@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>司機定位回報</title>
+  <style>
+    body { font-family: sans-serif; padding: 16px; max-width: 480px; margin: 0 auto; }
+    .status { padding: 12px; background: #f0f0f0; border-radius: 8px; margin: 8px 0; }
+    input { width: 100%; padding: 8px; margin: 4px 0; box-sizing: border-box; }
+    button { width: 100%; padding: 12px; background: #06c755; color: white; border: none; border-radius: 8px; font-size: 16px; }
+  </style>
+</head>
+<body>
+  <h1>司機定位回報</h1>
+  <p>LIFF 頁面：每 8 秒回報一次位置（需保持前景）</p>
+  <label>司機 ID（開發測試用）</label>
+  <input id="driverId" type="number" placeholder="例如 1">
+  <button id="startBtn">開始回報位置</button>
+  <div id="status" class="status">等待開始...</div>
+
+  <script>
+    const API_BASE = window.location.origin;
+    let watchId = null;
+
+    document.getElementById('startBtn').addEventListener('click', () => {
+      const driverId = parseInt(document.getElementById('driverId').value, 10);
+      if (!driverId) {
+        alert('請輸入司機 ID');
+        return;
+      }
+      if (!navigator.geolocation) {
+        alert('此裝置不支援定位');
+        return;
+      }
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => reportLocation(driverId, pos.coords.latitude, pos.coords.longitude),
+        (err) => setStatus('定位錯誤: ' + err.message),
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+      );
+      setStatus('定位中...');
+    });
+
+    async function reportLocation(driverId, lat, lng) {
+      try {
+        const res = await fetch(API_BASE + '/api/driver/location', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ driver_id: driverId, lat, lng })
+        });
+        if (res.ok) {
+          setStatus(`已回報 #${driverId}: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+        } else {
+          setStatus('回報失敗: HTTP ' + res.status);
+        }
+      } catch (e) {
+        setStatus('回報失敗: ' + e.message);
+      }
+    }
+
+    function setStatus(msg) {
+      document.getElementById('status').textContent = msg;
+    }
+  </script>
+</body>
+</html>
