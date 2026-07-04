@@ -49,7 +49,8 @@ func NewRideRepository(db *gorm.DB) *RideRepository {
 }
 
 func (r *RideRepository) Create(ride *model.Ride) error {
-	result := r.db.Exec(`
+	// 用 RETURNING 直接取回自增 id，避免以 requested_at 反查造成的競態/誤取
+	return r.db.Raw(`
 		INSERT INTO rides (
 			customer_id, status, pickup_point, pickup_address,
 			requested_at, created_at, updated_at
@@ -58,6 +59,7 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 			ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
 			?, ?, ?, ?
 		)
+		RETURNING id
 	`,
 		ride.CustomerID,
 		ride.Status,
@@ -67,15 +69,7 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 		ride.RequestedAt,
 		ride.CreatedAt,
 		ride.UpdatedAt,
-	)
-	if result.Error != nil {
-		return result.Error
-	}
-	return r.db.Raw(`
-		SELECT id FROM rides
-		WHERE customer_id = ? AND requested_at = ?
-		ORDER BY id DESC LIMIT 1
-	`, ride.CustomerID, ride.RequestedAt).Scan(&ride.ID).Error
+	).Scan(&ride.ID).Error
 }
 
 type DriverRepository struct {

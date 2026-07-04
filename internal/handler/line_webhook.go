@@ -1,10 +1,7 @@
 package handler
 
 import (
-	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -73,21 +70,30 @@ func (h *LineWebhookHandler) Handle(c *gin.Context) {
 		return
 	}
 
+	var rideIDs []int64
 	for _, event := range payload.Events {
 		switch event.Type {
 		case "message":
-			h.handleMessage(c, event)
+			if id := h.handleMessage(c, event); id > 0 {
+				rideIDs = append(rideIDs, id)
+			}
 		case "postback":
 			h.handlePostback(c, event)
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	// LINE 會忽略回應內容；附上 ride_ids 方便自動化測試/除錯取得建立的訂單編號
+	resp := gin.H{"ok": true}
+	if len(rideIDs) > 0 {
+		resp["ride_ids"] = rideIDs
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
-func (h *LineWebhookHandler) handleMessage(c *gin.Context, event lineEvent) {
+// handleMessage 處理位置訊息並建立訂單，回傳建立的 ride id（無則回 0）
+func (h *LineWebhookHandler) handleMessage(c *gin.Context, event lineEvent) int64 {
 	if event.Message.Type != "location" || event.Source.UserID == "" {
-		return
+		return 0
 	}
 
 	ride, err := h.rideService.CreateFromLocation(c.Request.Context(), service.RideRequest{
@@ -100,7 +106,7 @@ func (h *LineWebhookHandler) handleMessage(c *gin.Context, event lineEvent) {
 	if err != nil {
 		log.Error().Err(err).Str("line_user_id", event.Source.UserID).Msg("建立叫車訂單失敗")
 		_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, err.Error())
-		return
+		return 0
 	}
 
 	log.Info().
@@ -110,6 +116,7 @@ func (h *LineWebhookHandler) handleMessage(c *gin.Context, event lineEvent) {
 		Msg("收到叫車位置")
 
 	_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, rideReceivedMessage)
+	return ride.ID
 }
 
 func (h *LineWebhookHandler) handlePostback(c *gin.Context, event lineEvent) {
@@ -118,17 +125,6 @@ func (h *LineWebhookHandler) handlePostback(c *gin.Context, event lineEvent) {
 	}
 
 	rideID, ok := lineclient.ParsePostbackRideID(event.Postback.Data)
-	if !ok {
-		// 也嘗試解析 URI 格式
-		if vals, err := url.ParseQuery(strings.ReplaceAll(event.Postback.Data, "&", "&")); err == nil {
-			if idStr := vals.Get("ride_id"); idStr != "" {
-				if id, err := parseInt64(idStr); err == nil {
-					rideID = id
-					ok = true
-				}
-			}
-		}
-	}
 	if !ok {
 		return
 	}
@@ -147,15 +143,4 @@ func (h *LineWebhookHandler) handlePostback(c *gin.Context, event lineEvent) {
 	if msg != "接單成功" {
 		_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, msg)
 	}
-}
-
-func parseInt64(s string) (int64, error) {
-	var n int64
-	for _, ch := range s {
-		if ch < '0' || ch > '9' {
-			return 0, fmt.Errorf("invalid")
-		}
-		n = n*10 + int64(ch-'0')
-	}
-	return n, nil
 }
