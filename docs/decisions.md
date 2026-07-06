@@ -37,3 +37,15 @@
   並相容既有司機 `DriverClaims` token（`ParseToken` 退回機制）。
 - **邊界**：WS 目前僅單向下推（伺服器 → 前端）；上行（如司機定位）仍走既有 REST。
   乘客/後台 WS 訂閱需各自的認證（乘客認證、admin 認證為 M5 後續 sub-plan）。
+
+## 2026-07-06 · M5-ADMIN 後台認證與唯讀 API
+
+- **admin 認證**：新 `admins` 表 + bcrypt 密碼，沿用通用角色 JWT（role=admin）。
+- **不開放公開註冊**：管理員由啟動時環境變數 `ADMIN_SEED_EMAIL/PASSWORD` 種子建立，
+  且僅在系統尚無任何 admin 時建立一次。
+- **唯讀優先**：本階段只做讀取端點（車隊/司機/訂單/軌跡/報表）。司機停用等寫入操作
+  刻意延後——真正的停用需派單邏輯配合，否則是假功能。
+- **車隊快照**：`OnlineDriverLocations` 讀 `drivers:geo` zset 全體再依 updated_at 過濾離線；
+  即時更新由已完成的 WS `driver.location`（admin 廣播）承擔。
+- **測試 helper**：新增 `newMigratedTestDB`（對 testcontainer 跑真 db/migrations，得完整 schema），
+  取代既有 `newTestDB`（只建最小 rides 表）供需要完整 schema 的整合測試使用。
