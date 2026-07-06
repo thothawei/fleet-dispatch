@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -10,19 +12,33 @@ import (
 	"line-fleet-dispatch/internal/model"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
+	"line-fleet-dispatch/internal/util"
 )
 
 const geofenceRadiusM = 100
 
-// TrackingService 位置回報、圍籬偵測、軌跡記錄
+// etaPushState 記錄上次推播 ETA 的時間與司機位置，用於節流
+type etaPushState struct {
+	at  time.Time
+	lat float64
+	lng float64
+}
+
+// TrackingService 位置回報、圍籬偵測、軌跡記錄、ETA 推播節流
 type TrackingService struct {
-	drivers   *repository.DriverRepository
-	rides     *repository.RideRepository
-	tracks    *repository.TrackRepository
-	redis     *redisstore.Store
-	line      *lineclient.Client
-	dispatch  *DispatchService
+	drivers  *repository.DriverRepository
+	rides    *repository.RideRepository
+	tracks   *repository.TrackRepository
+	redis    *redisstore.Store
+	line     *lineclient.Client
+	dispatch *DispatchService
+
+	etaMinInterval   time.Duration
+	etaDistThreshold float64
+
+	mu        sync.Mutex
 	geofenced map[int64]bool
+	etaPushed map[int64]etaPushState
 }
 
 func NewTrackingService(
@@ -32,15 +48,19 @@ func NewTrackingService(
 	redis *redisstore.Store,
 	line *lineclient.Client,
 	dispatch *DispatchService,
+	etaMinIntervalSec, etaDistThresholdM int,
 ) *TrackingService {
 	return &TrackingService{
-		drivers:   drivers,
-		rides:     rides,
-		tracks:    tracks,
-		redis:     redis,
-		line:      line,
-		dispatch:  dispatch,
-		geofenced: make(map[int64]bool),
+		drivers:          drivers,
+		rides:            rides,
+		tracks:           tracks,
+		redis:            redis,
+		line:             line,
+		dispatch:         dispatch,
+		etaMinInterval:   time.Duration(etaMinIntervalSec) * time.Second,
+		etaDistThreshold: float64(etaDistThresholdM),
+		geofenced:        make(map[int64]bool),
+		etaPushed:        make(map[int64]etaPushState),
 	}
 }
 
@@ -66,8 +86,11 @@ func (s *TrackingService) handleActiveRide(ctx context.Context, driver *model.Dr
 
 	switch ride.Status {
 	case constants.RideStatusAccepted:
-		s.checkGeofence(ctx, ride, lat, lng)
-		s.dispatch.NotifyCustomerETA(ctx, ride, lat, lng)
+		s.checkGeofence(ctx, ride, lat, lng) // 圍籬抵達即時通知，不節流
+		if s.shouldPushETA(ride.ID, lat, lng) {
+			log.Info().Int64("ride_id", ride.ID).Msg("推播客戶 ETA")
+			s.dispatch.NotifyCustomerETA(ctx, ride, lat, lng)
+		}
 	case constants.RideStatusPickedUp:
 		if err := s.tracks.Insert(ride.ID, driver.ID, lat, lng); err != nil {
 			log.Error().Err(err).Int64("ride_id", ride.ID).Msg("寫入軌跡失敗")
@@ -76,15 +99,40 @@ func (s *TrackingService) handleActiveRide(ctx context.Context, driver *model.Dr
 	return nil
 }
 
+// shouldPushETA 節流：距上次推播超過 etaMinInterval，或司機移動超過 etaDistThreshold 才推；首次一定推
+func (s *TrackingService) shouldPushETA(rideID int64, lat, lng float64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prev, ok := s.etaPushed[rideID]
+	if ok &&
+		time.Since(prev.at) < s.etaMinInterval &&
+		util.HaversineM(prev.lat, prev.lng, lat, lng) < s.etaDistThreshold {
+		return false
+	}
+	s.etaPushed[rideID] = etaPushState{at: time.Now(), lat: lat, lng: lng}
+	return true
+}
+
 func (s *TrackingService) checkGeofence(ctx context.Context, ride *model.Ride, lat, lng float64) {
-	if s.geofenced[ride.ID] {
+	s.mu.Lock()
+	already := s.geofenced[ride.ID]
+	s.mu.Unlock()
+	if already {
 		return
 	}
+
 	within, err := s.rides.IsWithinPickup(ride.ID, lat, lng, geofenceRadiusM)
 	if err != nil || !within {
 		return
 	}
+
+	s.mu.Lock()
+	if s.geofenced[ride.ID] { // 併發時再檢查一次，避免重複通知
+		s.mu.Unlock()
+		return
+	}
 	s.geofenced[ride.ID] = true
+	s.mu.Unlock()
 
 	customerLineID, err := s.rides.GetCustomerLineUserID(ride.ID)
 	if err != nil || customerLineID == "" {
@@ -127,7 +175,11 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 		return err
 	}
 	_ = s.drivers.UpdateStatus(driverID, constants.DriverStatusIdle)
+
+	s.mu.Lock()
 	delete(s.geofenced, rideID)
+	delete(s.etaPushed, rideID)
+	s.mu.Unlock()
 
 	customerLineID, _ := s.rides.GetCustomerLineUserID(rideID)
 	if customerLineID != "" {

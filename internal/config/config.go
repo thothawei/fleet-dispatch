@@ -33,6 +33,9 @@ type Config struct {
 	DispatchOfferTimeoutSec int
 	DispatchMaxAttempts     int
 	DriverOfflineSec        int
+
+	ETAPushMinIntervalSec int
+	ETAPushDistThresholdM int
 }
 
 // Load 讀取環境變數，缺省值對應本地 docker-compose
@@ -57,6 +60,8 @@ func Load() (*Config, error) {
 		DispatchOfferTimeoutSec: getEnvInt("DISPATCH_OFFER_TIMEOUT_SEC", 20),
 		DispatchMaxAttempts:     getEnvInt("DISPATCH_MAX_ATTEMPTS", 3),
 		DriverOfflineSec:        getEnvInt("DRIVER_OFFLINE_SEC", 60),
+		ETAPushMinIntervalSec:   getEnvInt("ETA_PUSH_MIN_INTERVAL_SEC", 30),
+		ETAPushDistThresholdM:   getEnvInt("ETA_PUSH_DIST_THRESHOLD_M", 300),
 	}
 	return cfg, nil
 }

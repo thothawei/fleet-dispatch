@@ -72,7 +72,10 @@ func main() {
 		cfg.DispatchOfferTimeoutSec, cfg.DispatchMaxAttempts,
 	)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
-	trackingService := service.NewTrackingService(driverRepo, rideRepo, trackRepo, redisStore, lineClient, dispatchService)
+	trackingService := service.NewTrackingService(
+		driverRepo, rideRepo, trackRepo, redisStore, lineClient, dispatchService,
+		cfg.ETAPushMinIntervalSec, cfg.ETAPushDistThresholdM,
+	)
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo)
 
