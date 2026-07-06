@@ -43,6 +43,9 @@ type Config struct {
 	WSWriteWaitSec    int
 	WSPongWaitSec     int
 	WSMaxMessageBytes int
+
+	AdminSeedEmail    string
+	AdminSeedPassword string
 }
 
 // Load 讀取環境變數，缺省值對應本地 docker-compose
@@ -76,6 +79,9 @@ func Load() (*Config, error) {
 		WSWriteWaitSec:    getEnvInt("WS_WRITE_WAIT_SEC", 10),
 		WSPongWaitSec:     getEnvInt("WS_PONG_WAIT_SEC", 60),
 		WSMaxMessageBytes: getEnvInt("WS_MAX_MESSAGE_BYTES", 4096),
+
+		AdminSeedEmail:    getEnv("ADMIN_SEED_EMAIL", ""),
+		AdminSeedPassword: getEnv("ADMIN_SEED_PASSWORD", ""),
 	}
 	return cfg, nil
 }

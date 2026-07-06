@@ -122,6 +122,17 @@ func main() {
 	reportHandler := handler.NewReportHandler(reportRepo)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 
+	// 後台：管理員 repo/service/handler，並依環境變數種一個管理員（僅在尚無 admin 時）
+	adminRepo := repository.NewAdminRepository(db)
+	adminRegistry := service.NewAdminRegistry(adminRepo)
+	if err := adminRegistry.EnsureSeed(context.Background(), cfg.AdminSeedEmail, cfg.AdminSeedPassword); err != nil {
+		log.Error().Err(err).Msg("建立種子管理員失敗")
+	}
+	adminHandler := handler.NewAdminHandler(
+		adminRegistry, driverRepo, rideRepo, trackRepo, reportRepo, redisStore,
+		cfg.JWTSecret, cfg.JWTExpiryHours,
+	)
+
 	// Routes
 	r.GET("/healthz", healthHandler.Healthz)
 	r.GET("/ws", wsHandler.Connect)
@@ -147,6 +158,18 @@ func main() {
 		// 唯讀（暫不保護，未來加 admin 認證）
 		api.GET("/rides/:id/track", rideHandler.Track)
 		api.GET("/reports/daily", reportHandler.Daily)
+
+		// 後台：登入公開，其餘受 admin JWT 保護
+		api.POST("/admin/login", adminHandler.Login)
+		adminG := api.Group("/admin")
+		adminG.Use(middleware.AdminAuth(cfg.JWTSecret))
+		{
+			adminG.GET("/fleet", adminHandler.Fleet)
+			adminG.GET("/drivers", adminHandler.Drivers)
+			adminG.GET("/rides", adminHandler.Rides)
+			adminG.GET("/rides/:id", adminHandler.RideDetail)
+			adminG.GET("/reports/daily", adminHandler.DailyReport)
+		}
 	}
 
 	// LIFF 靜態頁
