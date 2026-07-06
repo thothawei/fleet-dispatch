@@ -74,3 +74,38 @@ func AdminIDFromCtx(c *gin.Context) int64 {
 	}
 	return 0
 }
+
+// CtxCustomerID 存放經 JWT 驗證後的乘客 id
+const CtxCustomerID = "customer_id"
+
+// CustomerAuth 驗證 Bearer JWT 且角色為 customer；非 customer 回 403，無效 token 回 401
+func CustomerAuth(secret string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "缺少或格式錯誤的授權標頭"})
+			return
+		}
+		role, id, err := auth.ParseToken(strings.TrimPrefix(header, "Bearer "), secret)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token 無效或已過期"})
+			return
+		}
+		if role != "customer" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要乘客身分"})
+			return
+		}
+		c.Set(CtxCustomerID, id)
+		c.Next()
+	}
+}
+
+// CustomerIDFromCtx 取出中介層放入的 customer_id
+func CustomerIDFromCtx(c *gin.Context) int64 {
+	if v, ok := c.Get(CtxCustomerID); ok {
+		if id, ok := v.(int64); ok {
+			return id
+		}
+	}
+	return 0
+}
