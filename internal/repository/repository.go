@@ -18,6 +18,15 @@ func NewCustomerRepository(db *gorm.DB) *CustomerRepository {
 	return &CustomerRepository{db: db}
 }
 
+func (r *CustomerRepository) FindByLineUserID(lineUserID string) (*model.Customer, error) {
+	var customer model.Customer
+	err := r.db.Where("line_user_id = ?", lineUserID).First(&customer).Error
+	if err != nil {
+		return nil, err
+	}
+	return &customer, nil
+}
+
 func (r *CustomerRepository) FindOrCreateByLineUserID(lineUserID, displayName string) (*model.Customer, error) {
 	var customer model.Customer
 	err := r.db.Where("line_user_id = ?", lineUserID).First(&customer).Error
@@ -167,6 +176,47 @@ func (r *RideRepository) FindActiveByDriver(driverID int64) (*model.Ride, error)
 		return nil, err
 	}
 	return &ride, nil
+}
+
+// FindActiveByCustomer 找客戶進行中的訂單（REQUESTED/ASSIGNED/ACCEPTED/PICKED_UP）
+func (r *RideRepository) FindActiveByCustomer(customerID int64) (*model.Ride, error) {
+	var ride model.Ride
+	err := r.db.Where("customer_id = ? AND status IN ?", customerID,
+		[]int16{
+			constants.RideStatusRequested, constants.RideStatusAssigned,
+			constants.RideStatusAccepted, constants.RideStatusPickedUp,
+		},
+	).Order("id DESC").First(&ride).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &ride, nil
+}
+
+// CancelRide 條件式取消（僅在允許的狀態才改），回傳是否真的取消到，避免與 accept/complete 競態
+func (r *RideRepository) CancelRide(id int64, allowed []int16) (bool, error) {
+	res := r.db.Model(&model.Ride{}).Where("id = ? AND status IN ?", id, allowed).
+		Updates(map[string]interface{}{
+			"status":       constants.RideStatusCancelled,
+			"completed_at": time.Now(),
+			"updated_at":   time.Now(),
+		})
+	return res.RowsAffected > 0, res.Error
+}
+
+// ResetToRequested 司機放棄已接訂單時，將訂單清回可重派狀態
+func (r *RideRepository) ResetToRequested(id int64) error {
+	return r.db.Model(&model.Ride{}).Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":         constants.RideStatusRequested,
+			"driver_id":      nil,
+			"accepted_at":    nil,
+			"eta_pickup_sec": nil,
+			"updated_at":     time.Now(),
+		}).Error
 }
 
 func (r *RideRepository) GetByID(id int64) (*model.Ride, error) {

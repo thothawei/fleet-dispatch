@@ -95,6 +95,12 @@ func (c *Client) PushRideOffer(ctx context.Context, to string, rideID int64, bod
 					Data:        fmt.Sprintf("action=accept&ride_id=%d", rideID),
 					DisplayText: "接受派單",
 				},
+				{
+					Type:        "postback",
+					Label:       "拒絕",
+					Data:        fmt.Sprintf("action=decline&ride_id=%d", rideID),
+					DisplayText: "拒絕派單",
+				},
 			},
 		},
 	}
@@ -140,22 +146,18 @@ func (c *Client) doPOST(ctx context.Context, url string, body []byte) error {
 	return nil
 }
 
-// ParsePostbackRideID 解析 postback data
-func ParsePostbackRideID(data string) (int64, bool) {
-	// action=accept&ride_id=123
-	const prefix = "action=accept&ride_id="
-	if len(data) <= len(prefix) || data[:len(prefix)] != prefix {
-		// 也支援 url query 格式
-		for _, part := range splitAmp(data) {
-			if len(part) > 8 && part[:8] == "ride_id=" {
-				id, err := strconv.ParseInt(part[8:], 10, 64)
-				return id, err == nil
+// ParsePostback 解析 postback data（格式：action=accept&ride_id=123 或 action=decline&ride_id=123）
+func ParsePostback(data string) (action string, rideID int64, ok bool) {
+	for _, part := range splitAmp(data) {
+		if len(part) > 7 && part[:7] == "action=" {
+			action = part[7:]
+		} else if len(part) > 8 && part[:8] == "ride_id=" {
+			if id, err := strconv.ParseInt(part[8:], 10, 64); err == nil {
+				rideID = id
 			}
 		}
-		return 0, false
 	}
-	id, err := strconv.ParseInt(data[len(prefix):], 10, 64)
-	return id, err == nil
+	return action, rideID, action != "" && rideID > 0
 }
 
 func splitAmp(s string) []string {

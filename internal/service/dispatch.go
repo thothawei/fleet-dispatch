@@ -20,6 +20,7 @@ import (
 type DispatchService struct {
 	drivers      *repository.DriverRepository
 	rides        *repository.RideRepository
+	customers    *repository.CustomerRepository
 	redis        *redisstore.Store
 	line         *lineclient.Client
 	eta          *ETAService
@@ -32,6 +33,7 @@ type DispatchService struct {
 func NewDispatchService(
 	drivers *repository.DriverRepository,
 	rides *repository.RideRepository,
+	customers *repository.CustomerRepository,
 	redis *redisstore.Store,
 	line *lineclient.Client,
 	eta *ETAService,
@@ -43,6 +45,7 @@ func NewDispatchService(
 	return &DispatchService{
 		drivers:      drivers,
 		rides:        rides,
+		customers:    customers,
 		redis:        redis,
 		line:         line,
 		eta:          eta,
@@ -84,10 +87,11 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		return err
 	}
 
-	// 篩掉「已派過的」與「非待命的」，避免重複派給同一台車
+	// 篩掉「已派過的」「已拒接的」「非待命的」，避免重複派給同一台車
+	rejected := s.redis.RejectedDrivers(ctx, rideID)
 	var targets []*model.Driver
 	for _, id := range candidates {
-		if offered[id] {
+		if offered[id] || rejected[id] {
 			continue
 		}
 		driver, err := s.drivers.FindByID(id)
@@ -147,9 +151,89 @@ func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
 		log.Error().Err(err).Int64("ride_id", rideID).Msg("逾時取消訂單失敗")
 		return
 	}
+	s.redis.ClearRejected(ctx, rideID)
 	log.Warn().Int64("ride_id", rideID).Msg("逾時無人接單，訂單自動取消")
 	if customerLineID, err := s.rides.GetCustomerLineUserID(rideID); err == nil && customerLineID != "" {
 		_ = s.line.PushText(ctx, customerLineID, "抱歉，附近暫無可用司機，請稍後再試")
+	}
+}
+
+// CancelByCustomer 客戶主動取消進行中的訂單（尚未上車前）
+func (s *DispatchService) CancelByCustomer(ctx context.Context, lineUserID string) (string, error) {
+	customer, err := s.customers.FindByLineUserID(lineUserID)
+	if err != nil {
+		return "您目前沒有進行中的叫車", nil
+	}
+	ride, err := s.rides.FindActiveByCustomer(customer.ID)
+	if err != nil {
+		return "", err
+	}
+	if ride == nil {
+		return "您目前沒有進行中的叫車", nil
+	}
+	if ride.Status == constants.RideStatusPickedUp {
+		return "行程已開始，無法取消", nil
+	}
+
+	ok, err := s.rides.CancelRide(ride.ID,
+		[]int16{constants.RideStatusRequested, constants.RideStatusAssigned, constants.RideStatusAccepted})
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "訂單狀態已變更，無法取消", nil
+	}
+	s.releaseAndReset(ctx, ride.ID, ride.DriverID)
+	log.Info().Int64("ride_id", ride.ID).Msg("客戶取消訂單")
+
+	// 若已派給司機，通知司機
+	if ride.DriverID != nil {
+		if d, e := s.drivers.FindByID(*ride.DriverID); e == nil {
+			_ = s.line.PushText(ctx, d.LineUserID, fmt.Sprintf("訂單 #%d 已被乘客取消", ride.ID))
+		}
+	}
+	return "已為您取消叫車", nil
+}
+
+// DeclineOffer 司機拒接派單邀請：記錄後重派會跳過此司機，訂單仍留在可派狀態
+func (s *DispatchService) DeclineOffer(ctx context.Context, rideID, driverID int64) error {
+	log.Info().Int64("ride_id", rideID).Int64("driver_id", driverID).Msg("司機拒單")
+	return s.redis.RejectRideDriver(ctx, rideID, driverID)
+}
+
+// CancelByDriver 司機放棄「已接」的訂單：司機回待命、標記拒接、訂單重新派單
+func (s *DispatchService) CancelByDriver(ctx context.Context, rideID, driverID int64) (string, error) {
+	ride, err := s.rides.GetByID(rideID)
+	if err != nil {
+		return "", err
+	}
+	if ride.DriverID == nil || *ride.DriverID != driverID {
+		return "", ErrForbidden
+	}
+	if ride.Status != constants.RideStatusAccepted {
+		return "此訂單目前無法放棄", nil
+	}
+	_ = s.redis.RejectRideDriver(ctx, rideID, driverID) // 重派時跳過這位放棄的司機
+	s.redis.ReleaseRideLock(ctx, rideID)
+	_ = s.drivers.UpdateStatus(driverID, constants.DriverStatusIdle)
+	if err := s.rides.ResetToRequested(rideID); err != nil {
+		return "", err
+	}
+	log.Warn().Int64("ride_id", rideID).Int64("driver_id", driverID).Msg("司機放棄訂單，重新派單")
+	go func() { _ = s.Dispatch(context.Background(), rideID) }()
+
+	if customerLineID, e := s.rides.GetCustomerLineUserID(rideID); e == nil && customerLineID != "" {
+		_ = s.line.PushText(ctx, customerLineID, "司機取消了行程，正在為您重新派車")
+	}
+	return "已放棄此訂單", nil
+}
+
+// releaseAndReset 取消後的共用收尾：釋放搶單鎖、清拒接集合、司機回待命
+func (s *DispatchService) releaseAndReset(ctx context.Context, rideID int64, driverID *int64) {
+	s.redis.ReleaseRideLock(ctx, rideID)
+	s.redis.ClearRejected(ctx, rideID)
+	if driverID != nil {
+		_ = s.drivers.UpdateStatus(*driverID, constants.DriverStatusIdle)
 	}
 }
 

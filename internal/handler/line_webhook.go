@@ -54,6 +54,7 @@ type lineSource struct {
 
 type lineMessage struct {
 	Type      string  `json:"type"`
+	Text      string  `json:"text"`
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
 	Address   string  `json:"address"`
@@ -90,9 +91,26 @@ func (h *LineWebhookHandler) Handle(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// handleMessage 處理位置訊息並建立訂單，回傳建立的 ride id（無則回 0）
+// handleMessage 處理訊息：位置→建立訂單（回傳 ride id）；文字「取消」→取消進行中訂單
 func (h *LineWebhookHandler) handleMessage(c *gin.Context, event lineEvent) int64 {
-	if event.Message.Type != "location" || event.Source.UserID == "" {
+	if event.Source.UserID == "" {
+		return 0
+	}
+
+	// 文字「取消 / 取消叫車」→ 客戶取消進行中的訂單
+	if event.Message.Type == "text" {
+		if t := event.Message.Text; t == "取消" || t == "取消叫車" {
+			msg, err := h.dispatch.CancelByCustomer(c.Request.Context(), event.Source.UserID)
+			if err != nil {
+				msg = "取消失敗，請稍後再試"
+				log.Error().Err(err).Str("line_user_id", event.Source.UserID).Msg("客戶取消失敗")
+			}
+			_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, msg)
+		}
+		return 0
+	}
+
+	if event.Message.Type != "location" {
 		return 0
 	}
 
@@ -124,7 +142,7 @@ func (h *LineWebhookHandler) handlePostback(c *gin.Context, event lineEvent) {
 		return
 	}
 
-	rideID, ok := lineclient.ParsePostbackRideID(event.Postback.Data)
+	action, rideID, ok := lineclient.ParsePostback(event.Postback.Data)
 	if !ok {
 		return
 	}
@@ -135,12 +153,18 @@ func (h *LineWebhookHandler) handlePostback(c *gin.Context, event lineEvent) {
 		return
 	}
 
-	msg, err := h.dispatch.AcceptRide(c.Request.Context(), rideID, driver.ID, event.ReplyToken)
-	if err != nil {
-		_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, err.Error())
-		return
-	}
-	if msg != "接單成功" {
-		_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, msg)
+	switch action {
+	case "decline":
+		_ = h.dispatch.DeclineOffer(c.Request.Context(), rideID, driver.ID)
+		_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, "已略過此派單")
+	case "accept":
+		msg, err := h.dispatch.AcceptRide(c.Request.Context(), rideID, driver.ID, event.ReplyToken)
+		if err != nil {
+			_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, err.Error())
+			return
+		}
+		if msg != "接單成功" {
+			_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, msg)
+		}
 	}
 }

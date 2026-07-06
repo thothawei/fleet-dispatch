@@ -67,7 +67,7 @@ func main() {
 
 	// Services
 	dispatchService := service.NewDispatchService(
-		driverRepo, rideRepo, redisStore, lineClient, etaService,
+		driverRepo, rideRepo, customerRepo, redisStore, lineClient, etaService,
 		cfg.DispatchRadiusM, cfg.DispatchMaxDrivers,
 		cfg.DispatchOfferTimeoutSec, cfg.DispatchMaxAttempts,
 	)
@@ -108,6 +108,7 @@ func main() {
 			authed.POST("/rides/:id/accept", rideHandler.Accept)
 			authed.POST("/rides/:id/pickup", rideHandler.PickUp)
 			authed.POST("/rides/:id/complete", rideHandler.Complete)
+			authed.POST("/rides/:id/cancel", rideHandler.Cancel)
 		}
 
 		// 唯讀（暫不保護，未來加 admin 認證）

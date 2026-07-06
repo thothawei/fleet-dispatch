@@ -68,6 +68,18 @@ func (h *RideHandler) Complete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// Cancel POST /api/rides/:id/cancel — 司機放棄已接的訂單（觸發重新派單）
+func (h *RideHandler) Cancel(c *gin.Context) {
+	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	driverID := middleware.DriverIDFromCtx(c)
+	msg, err := h.dispatch.CancelByDriver(c.Request.Context(), rideID, driverID)
+	if err != nil {
+		c.JSON(statusForErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": msg})
+}
+
 // Track GET /api/rides/:id/track — GeoJSON 軌跡回放
 func (h *RideHandler) Track(c *gin.Context) {
 	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)

@@ -87,6 +87,35 @@ func (s *Store) ReleaseRideLock(ctx context.Context, rideID int64) {
 	s.client.Del(ctx, fmt.Sprintf("ride:%d:lock", rideID))
 }
 
+// RejectRideDriver 記錄「此司機拒接本單」，重派時會被跳過
+func (s *Store) RejectRideDriver(ctx context.Context, rideID, driverID int64) error {
+	key := fmt.Sprintf("ride:%d:rejected", rideID)
+	if err := s.client.SAdd(ctx, key, driverID).Err(); err != nil {
+		return err
+	}
+	return s.client.Expire(ctx, key, 30*time.Minute).Err()
+}
+
+// RejectedDrivers 取得本單已拒接的司機集合
+func (s *Store) RejectedDrivers(ctx context.Context, rideID int64) map[int64]bool {
+	m := map[int64]bool{}
+	vals, err := s.client.SMembers(ctx, fmt.Sprintf("ride:%d:rejected", rideID)).Result()
+	if err != nil {
+		return m
+	}
+	for _, v := range vals {
+		if id, e := strconv.ParseInt(v, 10, 64); e == nil {
+			m[id] = true
+		}
+	}
+	return m
+}
+
+// ClearRejected 清掉本單的拒接集合（取消/完成時）
+func (s *Store) ClearRejected(ctx context.Context, rideID int64) {
+	s.client.Del(ctx, fmt.Sprintf("ride:%d:rejected", rideID))
+}
+
 // GetDriverLocation 取得司機最新位置
 func (s *Store) GetDriverLocation(ctx context.Context, driverID int64) (lat, lng float64, ok bool) {
 	idStr := strconv.FormatInt(driverID, 10)
