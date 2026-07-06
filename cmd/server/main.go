@@ -91,6 +91,7 @@ func main() {
 		driverRepo, rideRepo, customerRepo, redisStore, lineClient, etaService,
 		cfg.DispatchRadiusM, cfg.DispatchMaxDrivers,
 		cfg.DispatchOfferTimeoutSec, cfg.DispatchMaxAttempts,
+		nil,
 	)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
 	trackingService := service.NewTrackingService(

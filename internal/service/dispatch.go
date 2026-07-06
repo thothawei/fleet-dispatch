@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"line-fleet-dispatch/internal/constants"
+	"line-fleet-dispatch/internal/events"
 	lineclient "line-fleet-dispatch/internal/line"
 	"line-fleet-dispatch/internal/model"
 	redisstore "line-fleet-dispatch/internal/redis"
@@ -28,6 +29,7 @@ type DispatchService struct {
 	maxCount     int
 	offerTimeout time.Duration
 	maxAttempts  int
+	publisher    events.Publisher
 }
 
 func NewDispatchService(
@@ -38,6 +40,7 @@ func NewDispatchService(
 	line *lineclient.Client,
 	eta *ETAService,
 	radiusM, maxCount, offerTimeoutSec, maxAttempts int,
+	publisher events.Publisher,
 ) *DispatchService {
 	if maxAttempts < 1 {
 		maxAttempts = 1
@@ -53,7 +56,16 @@ func NewDispatchService(
 		maxCount:     maxCount,
 		offerTimeout: time.Duration(offerTimeoutSec) * time.Second,
 		maxAttempts:  maxAttempts,
+		publisher:    publisher,
 	}
+}
+
+// publish nil-safe 事件發佈（未接 Hub 時靜默略過）
+func (s *DispatchService) publish(rec events.Recipient, ev events.Event) {
+	if s.publisher == nil {
+		return
+	}
+	s.publisher.Publish(rec, ev)
 }
 
 // Dispatch 叫車後啟動派單（含逾時重派）
@@ -135,6 +147,11 @@ func (s *DispatchService) pushOffer(ctx context.Context, driver *model.Driver, r
 	if err := s.line.PushRideOffer(ctx, driver.LineUserID, rideID, msg); err != nil {
 		log.Error().Err(err).Int64("driver_id", driver.ID).Msg("推播派單失敗")
 	}
+	s.publish(events.Recipient{Role: events.RoleDriver, ID: driver.ID}, events.Event{
+		Type:    events.TypeRideAssigned,
+		RideID:  rideID,
+		Payload: map[string]any{"address": address, "eta_sec": etaSec, "dist_m": distM},
+	})
 }
 
 // giveUpIfUnaccepted 逾時仍無人接單 → 取消訂單並通知客戶（避免永久停在 ASSIGNED）
@@ -156,6 +173,10 @@ func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
 	if customerLineID, err := s.rides.GetCustomerLineUserID(rideID); err == nil && customerLineID != "" {
 		_ = s.line.PushText(ctx, customerLineID, "抱歉，附近暫無可用司機，請稍後再試")
 	}
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:   events.TypeRideCancelled,
+		RideID: rideID,
+	})
 }
 
 // CancelByCustomer 客戶主動取消進行中的訂單（尚未上車前）
@@ -185,6 +206,10 @@ func (s *DispatchService) CancelByCustomer(ctx context.Context, lineUserID strin
 	}
 	s.releaseAndReset(ctx, ride.ID, ride.DriverID)
 	log.Info().Int64("ride_id", ride.ID).Msg("客戶取消訂單")
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:   events.TypeRideCancelled,
+		RideID: ride.ID,
+	})
 
 	// 若已派給司機，通知司機
 	if ride.DriverID != nil {
@@ -294,6 +319,16 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		customerMsg := fmt.Sprintf("司機 %s 已接單！%s", driver.Name, FormatETAMessage(0, etaSec))
 		_ = s.line.PushText(ctx, customerLineID, customerMsg)
 	}
+
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:    events.TypeRideAccepted,
+		RideID:  rideID,
+		Payload: map[string]any{"driver_name": driver.Name, "eta_sec": etaSec},
+	})
+	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
+		Type:   events.TypeRideAccepted,
+		RideID: rideID,
+	})
 
 	return "接單成功", nil
 }
