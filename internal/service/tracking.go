@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"line-fleet-dispatch/internal/constants"
+	"line-fleet-dispatch/internal/events"
 	lineclient "line-fleet-dispatch/internal/line"
 	"line-fleet-dispatch/internal/model"
 	redisstore "line-fleet-dispatch/internal/redis"
@@ -30,8 +31,9 @@ type TrackingService struct {
 	rides    *repository.RideRepository
 	tracks   *repository.TrackRepository
 	redis    *redisstore.Store
-	line     *lineclient.Client
-	dispatch *DispatchService
+	line      *lineclient.Client
+	dispatch  *DispatchService
+	publisher events.Publisher
 
 	etaMinInterval   time.Duration
 	etaDistThreshold float64
@@ -49,6 +51,7 @@ func NewTrackingService(
 	line *lineclient.Client,
 	dispatch *DispatchService,
 	etaMinIntervalSec, etaDistThresholdM int,
+	publisher events.Publisher,
 ) *TrackingService {
 	return &TrackingService{
 		drivers:          drivers,
@@ -57,11 +60,20 @@ func NewTrackingService(
 		redis:            redis,
 		line:             line,
 		dispatch:         dispatch,
+		publisher:        publisher,
 		etaMinInterval:   time.Duration(etaMinIntervalSec) * time.Second,
 		etaDistThreshold: float64(etaDistThresholdM),
 		geofenced:        make(map[int64]bool),
 		etaPushed:        make(map[int64]etaPushState),
 	}
+}
+
+// publish nil-safe 事件發佈
+func (s *TrackingService) publish(rec events.Recipient, ev events.Event) {
+	if s.publisher == nil {
+		return
+	}
+	s.publisher.Publish(rec, ev)
 }
 
 // ReportDriverLocation 司機回報位置
@@ -74,6 +86,11 @@ func (s *TrackingService) ReportDriverLocation(ctx context.Context, driverID int
 	if err := s.redis.UpdateDriverLocation(ctx, driverID, lat, lng); err != nil {
 		return err
 	}
+
+	s.publish(events.Recipient{Role: events.RoleAdmin, ID: 0}, events.Event{
+		Type:    events.TypeDriverLocation,
+		Payload: map[string]any{"driver_id": driverID, "lat": lat, "lng": lng},
+	})
 
 	return s.handleActiveRide(ctx, driver, lat, lng)
 }
@@ -140,6 +157,10 @@ func (s *TrackingService) checkGeofence(ctx context.Context, ride *model.Ride, l
 	}
 	log.Info().Int64("ride_id", ride.ID).Msg("司機進入上車圍籬")
 	_ = s.line.PushText(ctx, customerLineID, "司機已抵達上車點，請準備上車")
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:   events.TypeDriverArrived,
+		RideID: ride.ID,
+	})
 }
 
 // PickUp 司機確認客戶上車
@@ -154,6 +175,10 @@ func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) er
 	if err := s.rides.MarkPickedUp(rideID); err != nil {
 		return err
 	}
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:   events.TypeRidePickedUp,
+		RideID: rideID,
+	})
 	customerLineID, _ := s.rides.GetCustomerLineUserID(rideID)
 	if customerLineID != "" {
 		_ = s.line.PushText(ctx, customerLineID, "行程開始，祝您旅途愉快")
@@ -175,6 +200,16 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 		return err
 	}
 	_ = s.drivers.UpdateStatus(driverID, constants.DriverStatusIdle)
+
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:    events.TypeRideCompleted,
+		RideID:  rideID,
+		Payload: map[string]any{"distance_m": distanceM},
+	})
+	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
+		Type:   events.TypeRideCompleted,
+		RideID: rideID,
+	})
 
 	s.mu.Lock()
 	delete(s.geofenced, rideID)

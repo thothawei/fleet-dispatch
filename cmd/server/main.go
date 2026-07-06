@@ -97,6 +97,7 @@ func main() {
 	trackingService := service.NewTrackingService(
 		driverRepo, rideRepo, trackRepo, redisStore, lineClient, dispatchService,
 		cfg.ETAPushMinIntervalSec, cfg.ETAPushDistThresholdM,
+		nil,
 	)
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo)
