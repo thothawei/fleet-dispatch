@@ -25,12 +25,13 @@ func (g *GeoPoint) Scan(value interface{}) error {
 }
 
 type Customer struct {
-	ID         int64     `gorm:"primaryKey"`
-	LineUserID string    `gorm:"column:line_user_id;uniqueIndex;not null"`
-	Name       string    `gorm:"not null;default:''"`
-	Phone      string    `gorm:"not null;default:''"`
-	CreatedAt  time.Time `gorm:"not null"`
-	UpdatedAt  time.Time `gorm:"not null"`
+	ID           int64     `gorm:"primaryKey"`
+	LineUserID   string    `gorm:"column:line_user_id;uniqueIndex;not null"`
+	Name         string    `gorm:"not null;default:''"`
+	Phone        string    `gorm:"not null;default:''"`
+	PasswordHash string    `gorm:"column:password_hash;not null;default:''"`
+	CreatedAt    time.Time `gorm:"not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
 }
 
 func (Customer) TableName() string {

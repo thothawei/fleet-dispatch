@@ -50,6 +50,21 @@ func (r *CustomerRepository) FindOrCreateByLineUserID(lineUserID, displayName st
 	return &customer, nil
 }
 
+func (r *CustomerRepository) FindByID(id int64) (*model.Customer, error) {
+	var customer model.Customer
+	if err := r.db.First(&customer, id).Error; err != nil {
+		return nil, err
+	}
+	return &customer, nil
+}
+
+func (r *CustomerRepository) SetPassword(id int64, passwordHash string) error {
+	return r.db.Model(&model.Customer{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"password_hash": passwordHash,
+		"updated_at":    time.Now(),
+	}).Error
+}
+
 type RideRepository struct {
 	db *gorm.DB
 }
