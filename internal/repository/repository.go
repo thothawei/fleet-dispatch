@@ -433,3 +433,29 @@ func (r *RideRepository) TrackDistanceM(rideID int64) (int, error) {
 	`, rideID).Scan(&dist).Error
 	return int(dist), err
 }
+
+type AdminRepository struct {
+	db *gorm.DB
+}
+
+func NewAdminRepository(db *gorm.DB) *AdminRepository {
+	return &AdminRepository{db: db}
+}
+
+func (r *AdminRepository) FindByEmail(email string) (*model.Admin, error) {
+	var a model.Admin
+	if err := r.db.Where("email = ?", email).First(&a).Error; err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (r *AdminRepository) Create(a *model.Admin) error {
+	return r.db.Create(a).Error
+}
+
+func (r *AdminRepository) CountAll() (int64, error) {
+	var n int64
+	err := r.db.Model(&model.Admin{}).Count(&n).Error
+	return n, err
+}
