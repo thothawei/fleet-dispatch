@@ -9,6 +9,9 @@ services:
       DB_HOST: postgis
       REDIS_ADDR: redis:6379
       OSRM_URL: ${OSRM_URL:-http://router.project-osrm.org}
+      # 首次啟動且尚無任何 admin 時，種一個超級管理員（預設 admin/admin，可用 env 覆蓋）
+      ADMIN_SEED_USERNAME: ${ADMIN_SEED_USERNAME:-admin}
+      ADMIN_SEED_PASSWORD: ${ADMIN_SEED_PASSWORD:-admin}
     volumes:
       - ./web/liff:/app/web/liff:ro
     depends_on:
@@ -25,7 +28,7 @@ services:
       POSTGRES_USER: ${DB_USER:-fleet}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
     ports:
-      - "5432:5432"
+      - "${DB_HOST_PORT:-5433}:5432"  # 5433 避免與本機 PostgreSQL 5432 衝突
     volumes:
       - postgis_data:/var/lib/postgresql/data
     healthcheck:

@@ -17,7 +17,7 @@ func TestAdminRepository_建立與查詢(t *testing.T) {
 	}
 
 	now := time.Now()
-	a := &model.Admin{Email: "ops@example.com", PasswordHash: "hash", Name: "值班", CreatedAt: now, UpdatedAt: now}
+	a := &model.Admin{Username: "ops", PasswordHash: "hash", Name: "值班", CreatedAt: now, UpdatedAt: now}
 	if err := repo.Create(a); err != nil {
 		t.Fatalf("Create 失敗: %v", err)
 	}
@@ -25,11 +25,11 @@ func TestAdminRepository_建立與查詢(t *testing.T) {
 		t.Fatal("Create 後未回填 ID")
 	}
 
-	got, err := repo.FindByEmail("ops@example.com")
+	got, err := repo.FindByUsername("ops")
 	if err != nil {
-		t.Fatalf("FindByEmail 失敗: %v", err)
+		t.Fatalf("FindByUsername 失敗: %v", err)
 	}
-	if got.Email != "ops@example.com" || got.Name != "值班" {
+	if got.Username != "ops" || got.Name != "值班" {
 		t.Fatalf("查詢結果錯誤: %+v", got)
 	}
 

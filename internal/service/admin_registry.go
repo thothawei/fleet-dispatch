@@ -11,7 +11,7 @@ import (
 
 // adminStore 抽象出 AdminRegistry 需要的 repository 行為（方便測試替身）
 type adminStore interface {
-	FindByEmail(email string) (*model.Admin, error)
+	FindByUsername(username string) (*model.Admin, error)
 	Create(a *model.Admin) error
 	CountAll() (int64, error)
 }
@@ -25,9 +25,9 @@ func NewAdminRegistry(admins adminStore) *AdminRegistry {
 	return &AdminRegistry{admins: admins}
 }
 
-// Login email + 密碼驗證
-func (s *AdminRegistry) Login(ctx context.Context, email, password string) (*model.Admin, error) {
-	admin, err := s.admins.FindByEmail(email)
+// Login 帳號 + 密碼驗證
+func (s *AdminRegistry) Login(ctx context.Context, username, password string) (*model.Admin, error) {
+	admin, err := s.admins.FindByUsername(username)
 	if err != nil {
 		return nil, ErrInvalidCredentials
 	}
@@ -38,9 +38,9 @@ func (s *AdminRegistry) Login(ctx context.Context, email, password string) (*mod
 	return admin, nil
 }
 
-// EnsureSeed 若系統尚無任何管理員且提供了 email/password，建立一個種子管理員
-func (s *AdminRegistry) EnsureSeed(ctx context.Context, email, password string) error {
-	if email == "" || password == "" {
+// EnsureSeed 若系統尚無任何管理員且提供了帳號/密碼，建立一個種子管理員
+func (s *AdminRegistry) EnsureSeed(ctx context.Context, username, password string) error {
+	if username == "" || password == "" {
 		return nil
 	}
 	n, err := s.admins.CountAll()
@@ -56,7 +56,7 @@ func (s *AdminRegistry) EnsureSeed(ctx context.Context, email, password string) 
 	}
 	now := time.Now()
 	return s.admins.Create(&model.Admin{
-		Email:        email,
+		Username:     username,
 		PasswordHash: string(hash),
 		Name:         "系統管理員",
 		CreatedAt:    now,

@@ -125,7 +125,7 @@ func main() {
 	// 後台：管理員 repo/service/handler，並依環境變數種一個管理員（僅在尚無 admin 時）
 	adminRepo := repository.NewAdminRepository(db)
 	adminRegistry := service.NewAdminRegistry(adminRepo)
-	if err := adminRegistry.EnsureSeed(context.Background(), cfg.AdminSeedEmail, cfg.AdminSeedPassword); err != nil {
+	if err := adminRegistry.EnsureSeed(context.Background(), cfg.AdminSeedUsername, cfg.AdminSeedPassword); err != nil {
 		log.Error().Err(err).Msg("建立種子管理員失敗")
 	}
 	adminHandler := handler.NewAdminHandler(

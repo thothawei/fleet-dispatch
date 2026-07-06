@@ -1,5 +1,14 @@
 # 技術決策紀錄
 
+## 2026-07-06 · 後台改帳號登入 + 超級帳號種子
+
+- **admin 登入由 email 改為帳號（username）**：migration 000007 將 `admins.email` 改名 `username`（沿用原 UNIQUE）；
+  model/repository/service/handler/config 全數 email→username。登入 body 改 `{username,password}`。
+- **超級帳號種子 admin/admin**：docker-compose `environment` 帶 `ADMIN_SEED_USERNAME/PASSWORD` 預設 admin/admin
+  （`EnsureSeed` 僅在尚無任何 admin 時建立一次）。⚠️ 踩雷：專案 `.env`（env_file）若殘留舊 `ADMIN_SEED_PASSWORD`
+  會被 compose `${VAR:-admin}` 插值取用而**覆蓋預設**，導致實際密碼非 admin——已清 .env 對齊。
+- 目前後台單一 admin 角色即全權限（尚無 RBAC）。
+
 ## 2026-07-03 · M1 骨架
 
 - **分層**：handler → service → repository，對照 Laravel 慣例。

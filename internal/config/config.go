@@ -44,7 +44,7 @@ type Config struct {
 	WSPongWaitSec     int
 	WSMaxMessageBytes int
 
-	AdminSeedEmail    string
+	AdminSeedUsername string
 	AdminSeedPassword string
 }
 
@@ -80,7 +80,7 @@ func Load() (*Config, error) {
 		WSPongWaitSec:     getEnvInt("WS_PONG_WAIT_SEC", 60),
 		WSMaxMessageBytes: getEnvInt("WS_MAX_MESSAGE_BYTES", 4096),
 
-		AdminSeedEmail:    getEnv("ADMIN_SEED_EMAIL", ""),
+		AdminSeedUsername: getEnv("ADMIN_SEED_USERNAME", ""),
 		AdminSeedPassword: getEnv("ADMIN_SEED_PASSWORD", ""),
 	}
 	return cfg, nil

@@ -491,9 +491,9 @@ func NewAdminRepository(db *gorm.DB) *AdminRepository {
 	return &AdminRepository{db: db}
 }
 
-func (r *AdminRepository) FindByEmail(email string) (*model.Admin, error) {
+func (r *AdminRepository) FindByUsername(username string) (*model.Admin, error) {
 	var a model.Admin
-	if err := r.db.Where("email = ?", email).First(&a).Error; err != nil {
+	if err := r.db.Where("username = ?", username).First(&a).Error; err != nil {
 		return nil, err
 	}
 	return &a, nil

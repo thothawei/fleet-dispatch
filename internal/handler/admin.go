@@ -44,14 +44,14 @@ func NewAdminHandler(
 // Login POST /api/admin/login
 func (h *AdminHandler) Login(c *gin.Context) {
 	var req struct {
-		Email    string `json:"email" binding:"required"`
+		Username string `json:"username" binding:"required"`
 		Password string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
 		return
 	}
-	admin, err := h.admins.Login(c.Request.Context(), req.Email, req.Password)
+	admin, err := h.admins.Login(c.Request.Context(), req.Username, req.Password)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
