@@ -15,6 +15,7 @@ import (
 
 	"line-fleet-dispatch/internal/config"
 	"line-fleet-dispatch/internal/database"
+	"line-fleet-dispatch/internal/events"
 	"line-fleet-dispatch/internal/handler"
 	lineclient "line-fleet-dispatch/internal/line"
 	"line-fleet-dispatch/internal/middleware"
@@ -80,6 +81,10 @@ func main() {
 		}
 	}()
 
+	// WebSocket Hub（即時事件通道，單 goroutine 常駐路由）
+	hub := events.NewHub()
+	go hub.Run()
+
 	// Infrastructure
 	redisStore := redisstore.NewStore(redisClient, cfg.DriverOfflineSec)
 	osrm := osrmclient.NewClient(cfg.OSRMURL)
@@ -91,13 +96,13 @@ func main() {
 		driverRepo, rideRepo, customerRepo, redisStore, lineClient, etaService,
 		cfg.DispatchRadiusM, cfg.DispatchMaxDrivers,
 		cfg.DispatchOfferTimeoutSec, cfg.DispatchMaxAttempts,
-		nil,
+		hub,
 	)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
 	trackingService := service.NewTrackingService(
 		driverRepo, rideRepo, trackRepo, redisStore, lineClient, dispatchService,
 		cfg.ETAPushMinIntervalSec, cfg.ETAPushDistThresholdM,
-		nil,
+		hub,
 	)
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo)
@@ -115,9 +120,11 @@ func main() {
 	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, cfg.JWTSecret, cfg.JWTExpiryHours)
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService)
 	reportHandler := handler.NewReportHandler(reportRepo)
+	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 
 	// Routes
 	r.GET("/healthz", healthHandler.Healthz)
+	r.GET("/ws", wsHandler.Connect)
 	r.POST("/webhook/line", middleware.LineSignature(cfg.LineChannelSecret), lineHandler.Handle)
 
 	api := r.Group("/api")
