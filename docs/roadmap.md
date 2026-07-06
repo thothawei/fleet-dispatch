@@ -150,7 +150,10 @@
 
 ---
 
-## Phase D — App 化（React Native 雙端）
+## Phase D — App 化（雙端）
+
+> ⚠️ **本節已由 [docs/superpowers/specs/2026-07-06-fleet-dual-client-design.md](superpowers/specs/2026-07-06-fleet-dual-client-design.md) 改寫並取代**：
+> 前端框架由 React Native **改為 Flutter**（一 repo 雙 flavor 出司機/乘客兩支）、**新增「營運後台」**（React+TS，後台 API 併入本 Go 專案）、里程碑重編為 M5~M8。以下原始 D0~D4 內容保留作歷史參考，實作以新 design doc 為準。
 
 > 後端約 8 成可沿用；主要是把「LINE 前台」換成「App 前台 + 原生定位 + 推播 + WebSocket」。
 
