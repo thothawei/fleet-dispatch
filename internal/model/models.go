@@ -38,13 +38,14 @@ func (Customer) TableName() string {
 }
 
 type Driver struct {
-	ID         int64     `gorm:"primaryKey"`
-	LineUserID string    `gorm:"column:line_user_id;uniqueIndex;not null"`
-	Name       string    `gorm:"not null;default:''"`
-	Phone      string    `gorm:"not null;default:''"`
-	Status     int16     `gorm:"not null;default:0"`
-	CreatedAt  time.Time `gorm:"not null"`
-	UpdatedAt  time.Time `gorm:"not null"`
+	ID           int64     `gorm:"primaryKey"`
+	LineUserID   string    `gorm:"column:line_user_id;uniqueIndex;not null"`
+	Name         string    `gorm:"not null;default:''"`
+	Phone        string    `gorm:"not null;default:''"`
+	Status       int16     `gorm:"not null;default:0"`
+	PasswordHash string    `gorm:"column:password_hash;not null;default:''"`
+	CreatedAt    time.Time `gorm:"not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
 }
 
 func (Driver) TableName() string {

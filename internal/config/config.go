@@ -25,9 +25,14 @@ type Config struct {
 
 	OSRMURL string
 
-	DispatchRadiusM    int
-	DispatchMaxDrivers int
-	DriverOfflineSec   int
+	JWTSecret      string
+	JWTExpiryHours int
+
+	DispatchRadiusM         int
+	DispatchMaxDrivers      int
+	DispatchOfferTimeoutSec int
+	DispatchMaxAttempts     int
+	DriverOfflineSec        int
 }
 
 // Load 讀取環境變數，缺省值對應本地 docker-compose
@@ -45,9 +50,13 @@ func Load() (*Config, error) {
 		LineChannelAccessToken: getEnv("LINE_CHANNEL_ACCESS_TOKEN", ""),
 		LiffID:                 getEnv("LIFF_ID", ""),
 		OSRMURL:                getEnv("OSRM_URL", "http://localhost:5000"),
-		DispatchRadiusM:        getEnvInt("DISPATCH_RADIUS_M", 3000),
-		DispatchMaxDrivers:     getEnvInt("DISPATCH_MAX_DRIVERS", 5),
-		DriverOfflineSec:       getEnvInt("DRIVER_OFFLINE_SEC", 60),
+		JWTSecret:              getEnv("JWT_SECRET", "dev-secret-change-me"),
+		JWTExpiryHours:         getEnvInt("JWT_EXPIRY_HOURS", 72),
+		DispatchRadiusM:         getEnvInt("DISPATCH_RADIUS_M", 3000),
+		DispatchMaxDrivers:      getEnvInt("DISPATCH_MAX_DRIVERS", 5),
+		DispatchOfferTimeoutSec: getEnvInt("DISPATCH_OFFER_TIMEOUT_SEC", 20),
+		DispatchMaxAttempts:     getEnvInt("DISPATCH_MAX_ATTEMPTS", 3),
+		DriverOfflineSec:        getEnvInt("DRIVER_OFFLINE_SEC", 60),
 	}
 	return cfg, nil
 }

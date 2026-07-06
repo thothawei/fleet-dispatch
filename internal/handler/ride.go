@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 
+	"line-fleet-dispatch/internal/middleware"
 	"line-fleet-dispatch/internal/service"
 )
 
@@ -24,19 +26,21 @@ func NewRideHandler(
 	return &RideHandler{dispatch: dispatch, tracking: tracking, rides: rides}
 }
 
-// Accept POST /api/rides/:id/accept
+// statusForErr 擁有權錯誤回 403，其餘狀態衝突回 409
+func statusForErr(err error) int {
+	if errors.Is(err, service.ErrForbidden) {
+		return http.StatusForbidden
+	}
+	return http.StatusConflict
+}
+
+// Accept POST /api/rides/:id/accept（需 JWT，driver_id 取自 token）
 func (h *RideHandler) Accept(c *gin.Context) {
 	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	var req struct {
-		DriverID int64 `json:"driver_id" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
-		return
-	}
-	msg, err := h.dispatch.AcceptRide(c.Request.Context(), rideID, req.DriverID, "")
+	driverID := middleware.DriverIDFromCtx(c)
+	msg, err := h.dispatch.AcceptRide(c.Request.Context(), rideID, driverID, "")
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		c.JSON(statusForErr(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": msg})
@@ -45,15 +49,9 @@ func (h *RideHandler) Accept(c *gin.Context) {
 // PickUp POST /api/rides/:id/pickup
 func (h *RideHandler) PickUp(c *gin.Context) {
 	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	var req struct {
-		DriverID int64 `json:"driver_id" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
-		return
-	}
-	if err := h.tracking.PickUp(c.Request.Context(), rideID, req.DriverID); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	driverID := middleware.DriverIDFromCtx(c)
+	if err := h.tracking.PickUp(c.Request.Context(), rideID, driverID); err != nil {
+		c.JSON(statusForErr(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -62,15 +60,9 @@ func (h *RideHandler) PickUp(c *gin.Context) {
 // Complete POST /api/rides/:id/complete
 func (h *RideHandler) Complete(c *gin.Context) {
 	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
-	var req struct {
-		DriverID int64 `json:"driver_id" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
-		return
-	}
-	if err := h.tracking.Complete(c.Request.Context(), rideID, req.DriverID); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	driverID := middleware.DriverIDFromCtx(c)
+	if err := h.tracking.Complete(c.Request.Context(), rideID, driverID); err != nil {
+		c.JSON(statusForErr(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})

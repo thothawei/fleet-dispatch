@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog/log"
 
@@ -15,15 +16,17 @@ import (
 	"line-fleet-dispatch/internal/util"
 )
 
-// DispatchService 派單：找最近司機 + 推播接單邀請
+// DispatchService 派單：找最近司機 + 推播接單邀請 + 逾時重派
 type DispatchService struct {
-	drivers  *repository.DriverRepository
-	rides    *repository.RideRepository
-	redis    *redisstore.Store
-	line     *lineclient.Client
-	eta      *ETAService
-	radiusM  int
-	maxCount int
+	drivers      *repository.DriverRepository
+	rides        *repository.RideRepository
+	redis        *redisstore.Store
+	line         *lineclient.Client
+	eta          *ETAService
+	radiusM      int
+	maxCount     int
+	offerTimeout time.Duration
+	maxAttempts  int
 }
 
 func NewDispatchService(
@@ -32,26 +35,41 @@ func NewDispatchService(
 	redis *redisstore.Store,
 	line *lineclient.Client,
 	eta *ETAService,
-	radiusM, maxCount int,
+	radiusM, maxCount, offerTimeoutSec, maxAttempts int,
 ) *DispatchService {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
 	return &DispatchService{
-		drivers:  drivers,
-		rides:    rides,
-		redis:    redis,
-		line:     line,
-		eta:      eta,
-		radiusM:  radiusM,
-		maxCount: maxCount,
+		drivers:      drivers,
+		rides:        rides,
+		redis:        redis,
+		line:         line,
+		eta:          eta,
+		radiusM:      radiusM,
+		maxCount:     maxCount,
+		offerTimeout: time.Duration(offerTimeoutSec) * time.Second,
+		maxAttempts:  maxAttempts,
 	}
 }
 
-// Dispatch 叫車後自動派單
+// Dispatch 叫車後啟動派單（含逾時重派）
 func (s *DispatchService) Dispatch(ctx context.Context, rideID int64) error {
+	return s.dispatchRound(rideID, 1, map[int64]bool{})
+}
+
+// dispatchRound 第 attempt 輪派單：擴大半徑、只派給「尚未派過的待命司機」；
+// 逾時仍未被接單則排下一輪；達上限仍無人接 → 取消並通知客戶，確保不卡在 ASSIGNED。
+// 各輪由 time.AfterFunc 依序觸發，同一 offered map 不會被並行存取。
+func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[int64]bool) error {
+	ctx := context.Background()
 	ride, err := s.rides.GetByID(rideID)
 	if err != nil {
+		log.Error().Err(err).Int64("ride_id", rideID).Msg("派單讀取訂單失敗")
 		return err
 	}
-	if ride.Status != constants.RideStatusRequested {
+	// 已被接單 / 已取消 → 停止派單
+	if ride.Status != constants.RideStatusRequested && ride.Status != constants.RideStatusAssigned {
 		return nil
 	}
 
@@ -60,38 +78,79 @@ func (s *DispatchService) Dispatch(ctx context.Context, rideID int64) error {
 		return err
 	}
 
-	driverIDs, err := s.redis.NearbyDriverIDs(ctx, pickupLat, pickupLng, s.radiusM, s.maxCount)
+	radius := s.radiusM * attempt // 每輪擴大搜尋半徑
+	candidates, err := s.redis.NearbyDriverIDs(ctx, pickupLat, pickupLng, radius, s.maxCount*attempt)
 	if err != nil {
 		return err
 	}
-	if len(driverIDs) == 0 {
-		log.Warn().Int64("ride_id", rideID).Msg("附近無可用司機")
-		return nil
-	}
 
-	_ = s.rides.UpdateStatus(rideID, constants.RideStatusAssigned)
-
-	for _, driverID := range driverIDs {
-		driver, err := s.drivers.FindByID(driverID)
+	// 篩掉「已派過的」與「非待命的」，避免重複派給同一台車
+	var targets []*model.Driver
+	for _, id := range candidates {
+		if offered[id] {
+			continue
+		}
+		driver, err := s.drivers.FindByID(id)
 		if err != nil || driver.Status != constants.DriverStatusIdle {
 			continue
 		}
-
-		driverLat, driverLng, ok := s.redis.GetDriverLocation(ctx, driverID)
-		etaSec, distM := 300, 1000
-		if ok {
-			etaSec, distM = s.eta.PickupETA(ctx, driverLat, driverLng, pickupLat, pickupLng)
-		}
-
-		navURL := util.GoogleMapsNavURL(pickupLat, pickupLng)
-		msg := fmt.Sprintf("新派單 #%d\n上車點：%s\n距離約 %d 公尺，ETA %d 分鐘\n導航：%s",
-			rideID, ride.PickupAddress, distM, etaSec/60, navURL)
-
-		if err := s.line.PushRideOffer(ctx, driver.LineUserID, rideID, msg); err != nil {
-			log.Error().Err(err).Int64("driver_id", driverID).Msg("推播派單失敗")
-		}
+		targets = append(targets, driver)
 	}
+
+	if len(targets) > 0 {
+		if ride.Status == constants.RideStatusRequested {
+			_ = s.rides.UpdateStatus(rideID, constants.RideStatusAssigned)
+		}
+		for _, d := range targets {
+			offered[d.ID] = true
+			s.pushOffer(ctx, d, rideID, ride.PickupAddress, pickupLat, pickupLng)
+		}
+		log.Info().Int64("ride_id", rideID).Int("attempt", attempt).Int("offered", len(targets)).Msg("已派單")
+	} else {
+		log.Warn().Int64("ride_id", rideID).Int("attempt", attempt).Msg("本輪無新可用司機")
+	}
+
+	// 逾時後：最後一輪 → 放棄並取消；否則 → 擴大重派
+	if attempt >= s.maxAttempts {
+		time.AfterFunc(s.offerTimeout, func() { s.giveUpIfUnaccepted(rideID) })
+		return nil
+	}
+	time.AfterFunc(s.offerTimeout, func() { _ = s.dispatchRound(rideID, attempt+1, offered) })
 	return nil
+}
+
+// pushOffer 推播單一司機接單邀請（附 ETA 與導航連結）
+func (s *DispatchService) pushOffer(ctx context.Context, driver *model.Driver, rideID int64, address string, pickupLat, pickupLng float64) {
+	etaSec, distM := 300, 1000
+	if driverLat, driverLng, ok := s.redis.GetDriverLocation(ctx, driver.ID); ok {
+		etaSec, distM = s.eta.PickupETA(ctx, driverLat, driverLng, pickupLat, pickupLng)
+	}
+	navURL := util.GoogleMapsNavURL(pickupLat, pickupLng)
+	msg := fmt.Sprintf("新派單 #%d\n上車點：%s\n距離約 %d 公尺，ETA %d 分鐘\n導航：%s",
+		rideID, address, distM, etaSec/60, navURL)
+	if err := s.line.PushRideOffer(ctx, driver.LineUserID, rideID, msg); err != nil {
+		log.Error().Err(err).Int64("driver_id", driver.ID).Msg("推播派單失敗")
+	}
+}
+
+// giveUpIfUnaccepted 逾時仍無人接單 → 取消訂單並通知客戶（避免永久停在 ASSIGNED）
+func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
+	ctx := context.Background()
+	ride, err := s.rides.GetByID(rideID)
+	if err != nil {
+		return
+	}
+	if ride.Status != constants.RideStatusRequested && ride.Status != constants.RideStatusAssigned {
+		return // 已被接單或已取消
+	}
+	if err := s.rides.UpdateStatus(rideID, constants.RideStatusCancelled); err != nil {
+		log.Error().Err(err).Int64("ride_id", rideID).Msg("逾時取消訂單失敗")
+		return
+	}
+	log.Warn().Int64("ride_id", rideID).Msg("逾時無人接單，訂單自動取消")
+	if customerLineID, err := s.rides.GetCustomerLineUserID(rideID); err == nil && customerLineID != "" {
+		_ = s.line.PushText(ctx, customerLineID, "抱歉，附近暫無可用司機，請稍後再試")
+	}
 }
 
 // AcceptRide 司機接單（搶單鎖）

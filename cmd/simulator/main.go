@@ -29,9 +29,10 @@ func main() {
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	type driverState struct {
-		ID  int64
-		Lat float64
-		Lng float64
+		ID    int64
+		Token string
+		Lat   float64
+		Lng   float64
 	}
 
 	var drivers []driverState
@@ -39,15 +40,16 @@ func main() {
 		lineUserID := fmt.Sprintf("sim-driver-%03d", i+1)
 		name := fmt.Sprintf("模擬司機%d", i+1)
 
-		id, err := registerDriver(client, *apiURL, lineUserID, name)
+		id, token, err := registerDriver(client, *apiURL, lineUserID, name)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "註冊司機 %s 失敗: %v\n", name, err)
 			continue
 		}
 		drivers = append(drivers, driverState{
-			ID:  id,
-			Lat: randFloat(taipeiLatMin, taipeiLatMax),
-			Lng: randFloat(taipeiLngMin, taipeiLngMax),
+			ID:    id,
+			Token: token,
+			Lat:   randFloat(taipeiLatMin, taipeiLatMax),
+			Lng:   randFloat(taipeiLngMin, taipeiLngMax),
 		})
 		fmt.Printf("已註冊司機 #%d (%s)\n", id, name)
 	}
@@ -65,7 +67,7 @@ func main() {
 			d.Lat = clamp(d.Lat, taipeiLatMin, taipeiLatMax)
 			d.Lng = clamp(d.Lng, taipeiLngMin, taipeiLngMax)
 
-			if err := reportLocation(client, *apiURL, d.ID, d.Lat, d.Lng); err != nil {
+			if err := reportLocation(client, *apiURL, d.Token, d.Lat, d.Lng); err != nil {
 				fmt.Fprintf(os.Stderr, "司機 #%d 回報失敗: %v\n", d.ID, err)
 			}
 		}
@@ -73,35 +75,42 @@ func main() {
 	}
 }
 
-func registerDriver(client *http.Client, apiURL, lineUserID, name string) (int64, error) {
+func registerDriver(client *http.Client, apiURL, lineUserID, name string) (int64, string, error) {
 	body, _ := json.Marshal(map[string]string{
 		"line_user_id": lineUserID,
 		"name":         name,
+		"password":     "sim-password",
 	})
 	resp, err := client.Post(apiURL+"/api/driver/register", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		return 0, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return 0, "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	var result struct {
-		DriverID int64 `json:"driver_id"`
+		DriverID int64  `json:"driver_id"`
+		Token    string `json:"token"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return result.DriverID, nil
+	return result.DriverID, result.Token, nil
 }
 
-func reportLocation(client *http.Client, apiURL string, driverID int64, lat, lng float64) error {
+func reportLocation(client *http.Client, apiURL, token string, lat, lng float64) error {
 	body, _ := json.Marshal(map[string]interface{}{
-		"driver_id": driverID,
-		"lat":       lat,
-		"lng":       lng,
+		"lat": lat,
+		"lng": lng,
 	})
-	resp, err := client.Post(apiURL+"/api/driver/location", "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, apiURL+"/api/driver/location", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

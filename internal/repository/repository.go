@@ -142,6 +142,13 @@ func (r *DriverRepository) UpdateStatus(id int64, status int16) error {
 	}).Error
 }
 
+func (r *DriverRepository) SetPassword(id int64, passwordHash string) error {
+	return r.db.Model(&model.Driver{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"password_hash": passwordHash,
+		"updated_at":    time.Now(),
+	}).Error
+}
+
 func (r *DriverRepository) ListIdle() ([]model.Driver, error) {
 	var drivers []model.Driver
 	err := r.db.Where("status = ?", constants.DriverStatusIdle).Find(&drivers).Error

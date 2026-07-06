@@ -69,6 +69,7 @@ func main() {
 	dispatchService := service.NewDispatchService(
 		driverRepo, rideRepo, redisStore, lineClient, etaService,
 		cfg.DispatchRadiusM, cfg.DispatchMaxDrivers,
+		cfg.DispatchOfferTimeoutSec, cfg.DispatchMaxAttempts,
 	)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
 	trackingService := service.NewTrackingService(driverRepo, rideRepo, trackRepo, redisStore, lineClient, dispatchService)
@@ -85,7 +86,7 @@ func main() {
 	// Handlers
 	healthHandler := handler.NewHealthHandler(db, redisClient)
 	lineHandler := handler.NewLineWebhookHandler(rideService, dispatchService, driverRepo, lineClient)
-	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry)
+	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, cfg.JWTSecret, cfg.JWTExpiryHours)
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService)
 	reportHandler := handler.NewReportHandler(reportRepo)
 
@@ -95,11 +96,21 @@ func main() {
 
 	api := r.Group("/api")
 	{
-		api.POST("/driver/location", driverHandler.ReportLocation)
+		// 公開：註冊 / 登入
 		api.POST("/driver/register", driverHandler.Register)
-		api.POST("/rides/:id/accept", rideHandler.Accept)
-		api.POST("/rides/:id/pickup", rideHandler.PickUp)
-		api.POST("/rides/:id/complete", rideHandler.Complete)
+		api.POST("/driver/login", driverHandler.Login)
+
+		// 受 JWT 保護：司機操作（driver_id 取自 token，不信任 body）
+		authed := api.Group("")
+		authed.Use(middleware.DriverAuth(cfg.JWTSecret))
+		{
+			authed.POST("/driver/location", driverHandler.ReportLocation)
+			authed.POST("/rides/:id/accept", rideHandler.Accept)
+			authed.POST("/rides/:id/pickup", rideHandler.PickUp)
+			authed.POST("/rides/:id/complete", rideHandler.Complete)
+		}
+
+		// 唯讀（暫不保護，未來加 admin 認證）
 		api.GET("/rides/:id/track", rideHandler.Track)
 		api.GET("/reports/daily", reportHandler.Daily)
 	}

@@ -2,57 +2,105 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"line-fleet-dispatch/internal/auth"
+	"line-fleet-dispatch/internal/middleware"
 	"line-fleet-dispatch/internal/service"
 )
 
 // DriverHandler 司機 API
 type DriverHandler struct {
-	tracking *service.TrackingService
-	drivers  *service.DriverRegistry
+	tracking       *service.TrackingService
+	drivers        *service.DriverRegistry
+	jwtSecret      string
+	jwtExpiryHours int
 }
 
-func NewDriverHandler(tracking *service.TrackingService, drivers *service.DriverRegistry) *DriverHandler {
-	return &DriverHandler{tracking: tracking, drivers: drivers}
+func NewDriverHandler(
+	tracking *service.TrackingService,
+	drivers *service.DriverRegistry,
+	jwtSecret string,
+	jwtExpiryHours int,
+) *DriverHandler {
+	return &DriverHandler{
+		tracking:       tracking,
+		drivers:        drivers,
+		jwtSecret:      jwtSecret,
+		jwtExpiryHours: jwtExpiryHours,
+	}
+}
+
+func (h *DriverHandler) issueToken(driverID int64) (string, error) {
+	return auth.GenerateDriverToken(driverID, h.jwtSecret, time.Duration(h.jwtExpiryHours)*time.Hour)
 }
 
 type locationRequest struct {
-	DriverID int64   `json:"driver_id" binding:"required"`
-	Lat      float64 `json:"lat" binding:"required"`
-	Lng      float64 `json:"lng" binding:"required"`
+	Lat float64 `json:"lat" binding:"required"`
+	Lng float64 `json:"lng" binding:"required"`
 }
 
-// ReportLocation POST /api/driver/location
+// ReportLocation POST /api/driver/location（需 JWT，driver_id 取自 token）
 func (h *DriverHandler) ReportLocation(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
 	var req locationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
 		return
 	}
 
-	if err := h.tracking.ReportDriverLocation(c.Request.Context(), req.DriverID, req.Lat, req.Lng); err != nil {
+	if err := h.tracking.ReportDriverLocation(c.Request.Context(), driverID, req.Lat, req.Lng); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// Register POST /api/driver/register（模擬器/開發用）
+// Register POST /api/driver/register（設定密碼並回傳 token）
 func (h *DriverHandler) Register(c *gin.Context) {
 	var req struct {
 		Name       string `json:"name" binding:"required"`
 		LineUserID string `json:"line_user_id" binding:"required"`
+		Password   string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
 		return
 	}
-	driver, err := h.drivers.Register(c.Request.Context(), req.LineUserID, req.Name)
+	driver, err := h.drivers.Register(c.Request.Context(), req.LineUserID, req.Name, req.Password)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"driver_id": driver.ID, "name": driver.Name})
+	token, err := h.issueToken(driver.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "簽發 token 失敗"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"driver_id": driver.ID, "name": driver.Name, "token": token})
+}
+
+// Login POST /api/driver/login（line_user_id + 密碼換 token）
+func (h *DriverHandler) Login(c *gin.Context) {
+	var req struct {
+		LineUserID string `json:"line_user_id" binding:"required"`
+		Password   string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	driver, err := h.drivers.Login(c.Request.Context(), req.LineUserID, req.Password)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	token, err := h.issueToken(driver.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "簽發 token 失敗"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"driver_id": driver.ID, "token": token})
 }

@@ -1,5 +1,5 @@
 #!/bin/sh
-# M1-M4 端到端煙霧測試。
+# M1-M4 + A1(JWT) 端到端煙霧測試。
 # 前提：docker compose 已啟動、且為乾淨資料庫（建議先 docker compose down -v）。
 # 請勿在 simulator 同時運行時執行，避免搶單造成干擾。
 set -e
@@ -10,18 +10,30 @@ fail() { echo "✗ $1"; exit 1; }
 echo "== healthz =="
 curl -sf "$API/healthz" | grep -q '"status":"ok"' || fail "healthz 未就緒"
 
-echo "== 註冊司機 =="
-DRIVER=$(curl -sf -X POST "$API/api/driver/register" \
+echo "== 註冊司機（含密碼，回傳 token）=="
+REG=$(curl -sf -X POST "$API/api/driver/register" \
   -H 'Content-Type: application/json' \
-  -d '{"line_user_id":"smoke-driver-1","name":"煙霧測試司機"}')
-DRIVER_ID=$(echo "$DRIVER" | grep -o '"driver_id":[0-9]*' | cut -d: -f2)
-[ -n "$DRIVER_ID" ] || fail "註冊司機失敗: $DRIVER"
+  -d '{"line_user_id":"smoke-driver-1","name":"煙霧測試司機","password":"pw123456"}')
+DRIVER_ID=$(echo "$REG" | grep -o '"driver_id":[0-9]*' | cut -d: -f2)
+[ -n "$DRIVER_ID" ] || fail "註冊司機失敗: $REG"
 echo "driver_id=$DRIVER_ID"
 
-echo "== 司機回報位置（台北 101 附近）=="
-curl -sf -X POST "$API/api/driver/location" \
+echo "== 登入換 token =="
+LOGIN=$(curl -sf -X POST "$API/api/driver/login" \
   -H 'Content-Type: application/json' \
-  -d "{\"driver_id\":$DRIVER_ID,\"lat\":25.033,\"lng\":121.565}" >/dev/null
+  -d '{"line_user_id":"smoke-driver-1","password":"pw123456"}')
+TOKEN=$(echo "$LOGIN" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+[ -n "$TOKEN" ] || fail "登入失敗: $LOGIN"
+
+echo "== 未帶 token 應被擋（401）=="
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/api/driver/location" \
+  -H 'Content-Type: application/json' -d '{"lat":25.033,"lng":121.565}')
+[ "$CODE" = "401" ] || fail "未帶 token 應回 401，實際 $CODE"
+
+echo "== 司機回報位置（帶 token，台北 101 附近）=="
+curl -sf -X POST "$API/api/driver/location" \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  -d '{"lat":25.033,"lng":121.565}' >/dev/null
 
 echo "== 客戶 LINE 叫車 =="
 RIDE=$(curl -sf -X POST "$API/webhook/line" \
@@ -33,26 +45,23 @@ echo "ride_id=$RIDE_ID"
 
 sleep 2  # 等非同步派單將訂單置為 Assigned
 
-echo "== 司機接單（斷言真的成功）=="
+echo "== 司機接單（帶 token，斷言真的成功）=="
 ACCEPT=$(curl -sf -X POST "$API/api/rides/$RIDE_ID/accept" \
-  -H 'Content-Type: application/json' \
-  -d "{\"driver_id\":$DRIVER_ID}")
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{}')
 echo "$ACCEPT" | grep -q '接單成功' || fail "接單未成功: $ACCEPT"
 
 echo "== 客戶上車 =="
 curl -sf -X POST "$API/api/rides/$RIDE_ID/pickup" \
-  -H 'Content-Type: application/json' \
-  -d "{\"driver_id\":$DRIVER_ID}" >/dev/null
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{}' >/dev/null
 
 echo "== 行程中回報軌跡 =="
 curl -sf -X POST "$API/api/driver/location" \
-  -H 'Content-Type: application/json' \
-  -d "{\"driver_id\":$DRIVER_ID,\"lat\":25.035,\"lng\":121.567}" >/dev/null
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  -d '{"lat":25.035,"lng":121.567}' >/dev/null
 
 echo "== 完成行程 =="
 curl -sf -X POST "$API/api/rides/$RIDE_ID/complete" \
-  -H 'Content-Type: application/json' \
-  -d "{\"driver_id\":$DRIVER_ID}" >/dev/null
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{}' >/dev/null
 
 echo "== 軌跡回放（GeoJSON Feature）=="
 curl -sf "$API/api/rides/$RIDE_ID/track" | grep -q '"type":"Feature"' || fail "軌跡回放格式錯誤"
