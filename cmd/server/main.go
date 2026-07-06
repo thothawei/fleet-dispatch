@@ -133,6 +133,10 @@ func main() {
 		cfg.JWTSecret, cfg.JWTExpiryHours,
 	)
 
+	// 乘客認證：註冊/登入（line_user_id + 密碼 JWT）
+	customerRegistry := service.NewCustomerRegistry(customerRepo)
+	customerHandler := handler.NewCustomerHandler(customerRegistry, cfg.JWTSecret, cfg.JWTExpiryHours)
+
 	// Routes
 	r.GET("/healthz", healthHandler.Healthz)
 	r.GET("/ws", wsHandler.Connect)
@@ -143,6 +147,10 @@ func main() {
 		// 公開：註冊 / 登入
 		api.POST("/driver/register", driverHandler.Register)
 		api.POST("/driver/login", driverHandler.Login)
+
+		// 乘客：註冊 / 登入（公開）
+		api.POST("/customer/register", customerHandler.Register)
+		api.POST("/customer/login", customerHandler.Login)
 
 		// 受 JWT 保護：司機操作（driver_id 取自 token，不信任 body）
 		authed := api.Group("")
