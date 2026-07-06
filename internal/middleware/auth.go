@@ -39,3 +39,38 @@ func DriverIDFromCtx(c *gin.Context) int64 {
 	}
 	return 0
 }
+
+// CtxAdminID 存放經 JWT 驗證後的管理員 id
+const CtxAdminID = "admin_id"
+
+// AdminAuth 驗證 Bearer JWT 且角色為 admin；非 admin 回 403，無效 token 回 401
+func AdminAuth(secret string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "缺少或格式錯誤的授權標頭"})
+			return
+		}
+		role, id, err := auth.ParseToken(strings.TrimPrefix(header, "Bearer "), secret)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token 無效或已過期"})
+			return
+		}
+		if role != "admin" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要管理員權限"})
+			return
+		}
+		c.Set(CtxAdminID, id)
+		c.Next()
+	}
+}
+
+// AdminIDFromCtx 取出中介層放入的 admin_id
+func AdminIDFromCtx(c *gin.Context) int64 {
+	if v, ok := c.Get(CtxAdminID); ok {
+		if id, ok := v.(int64); ok {
+			return id
+		}
+	}
+	return 0
+}
