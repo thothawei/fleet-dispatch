@@ -74,3 +74,16 @@ type Ride struct {
 func (Ride) TableName() string {
 	return "rides"
 }
+
+type Admin struct {
+	ID           int64     `gorm:"primaryKey"`
+	Email        string    `gorm:"uniqueIndex;not null"`
+	PasswordHash string    `gorm:"column:password_hash;not null;default:''"`
+	Name         string    `gorm:"not null;default:''"`
+	CreatedAt    time.Time `gorm:"not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
+}
+
+func (Admin) TableName() string {
+	return "admins"
+}
