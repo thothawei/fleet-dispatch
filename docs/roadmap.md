@@ -90,7 +90,9 @@
 - [x] 排程自動建立未來月分區（啟動實測建出 2026_09，每日 ticker 持續推進）
 - [x] 寫入次月軌跡落在正確分區、不報錯（9 月 track → ride_tracks_2026_09）
 
-### A6. 測試補強
+### A6. 測試補強 — ✅ 已完成（2026-07-04）
+> testcontainers 起真 Redis/PostGIS 的整合測試：搶單併發（50 goroutine 恰 1 贏家，-count=5 穩定）、派單最近排序+離線過濾、圍籬 ST_DWithin 邊界（89m 內/167m 外）。`make test`（CGO_ENABLED=0，需 Docker）全綠。**Phase A 完成。**
+
 **做什麼**
 - 現況只有簽章單元測試。補關鍵路徑整合測試（testcontainers 起真 PG/Redis）：
   - **搶單併發**：N 個 goroutine 同時接同一單，只有 1 個成功
@@ -98,8 +100,8 @@
   - **派單**：最近司機選取、離線過濾
 
 **驗收條件**
-- [ ] `go test ./...` 綠燈，含上述整合測試
-- [ ] 搶單併發測試能穩定重現「只有一位成功」
+- [x] `make test`（go test ./...）綠燈，含 Redis/PostGIS 整合測試
+- [x] 搶單併發測試穩定重現「只有一位成功」（-count=5 全過）
 
 ---
 

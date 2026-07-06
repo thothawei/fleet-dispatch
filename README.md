@@ -55,6 +55,8 @@ docker compose up --build -d  # 起 app + postgis + redis
 curl http://localhost:8080/healthz          # → {"status":"ok"}
 sh scripts/smoke_test.sh                     # 跑完整 M1-M4 流程（需乾淨 DB）
 
+make test                                    # 整合測試（testcontainers 起真 Redis/PostGIS，需 Docker）
+
 # 選用：起 20 台模擬司機灌位置（勿與 smoke_test 同時跑，會互相搶單）
 docker compose --profile simulator up -d simulator
 ```
