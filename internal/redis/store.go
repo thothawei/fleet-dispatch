@@ -128,6 +128,43 @@ func (s *Store) GetDriverLocation(ctx context.Context, driverID int64) (lat, lng
 	return lat, lng, lat != 0 || lng != 0
 }
 
+// DriverLoc 後台車隊快照用：單一司機的即時座標
+type DriverLoc struct {
+	DriverID  int64   `json:"driver_id"`
+	Lat       float64 `json:"lat"`
+	Lng       float64 `json:"lng"`
+	UpdatedAt int64   `json:"updated_at"`
+}
+
+// OnlineDriverLocations 列出所有「未離線」司機的即時座標（後台車隊快照）。
+// 從 drivers:geo（zset）取全體成員，再以各司機 hash 的 updated_at 過濾離線。
+func (s *Store) OnlineDriverLocations(ctx context.Context) ([]DriverLoc, error) {
+	ids, err := s.client.ZRange(ctx, driversGeoKey, 0, -1).Result()
+	if err != nil {
+		return nil, err
+	}
+	cutoff := time.Now().Add(-time.Duration(s.driverOfflineSec) * time.Second).Unix()
+	var out []DriverLoc
+	for _, idStr := range ids {
+		m, err := s.client.HGetAll(ctx, fmt.Sprintf("driver:%s:loc", idStr)).Result()
+		if err != nil || len(m) == 0 {
+			continue
+		}
+		updatedAt, _ := strconv.ParseInt(m["updated_at"], 10, 64)
+		if updatedAt < cutoff {
+			continue
+		}
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			continue
+		}
+		lat, _ := strconv.ParseFloat(m["lat"], 64)
+		lng, _ := strconv.ParseFloat(m["lng"], 64)
+		out = append(out, DriverLoc{DriverID: id, Lat: lat, Lng: lng, UpdatedAt: updatedAt})
+	}
+	return out, nil
+}
+
 // AllowRateLimit 叫車限流，回傳是否允許
 func (s *Store) AllowRateLimit(ctx context.Context, lineUserID string, maxPerMin int) (bool, error) {
 	key := fmt.Sprintf("ratelimit:%s", lineUserID)

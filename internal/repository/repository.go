@@ -434,6 +434,40 @@ func (r *RideRepository) TrackDistanceM(rideID int64) (int, error) {
 	return int(dist), err
 }
 
+func (r *DriverRepository) ListAll() ([]model.Driver, error) {
+	var drivers []model.Driver
+	err := r.db.Order("id ASC").Find(&drivers).Error
+	return drivers, err
+}
+
+// AdminRideRow 後台訂單列表的投影（不含地理欄位，避免 GeoPoint 掃描問題）
+type AdminRideRow struct {
+	ID            int64      `json:"id"`
+	CustomerID    int64      `json:"customer_id"`
+	DriverID      *int64     `json:"driver_id"`
+	Status        int16      `json:"status"`
+	PickupAddress string     `json:"pickup_address"`
+	RequestedAt   time.Time  `json:"requested_at"`
+	CompletedAt   *time.Time `json:"completed_at"`
+	DistanceM     *int       `json:"distance_m"`
+}
+
+// ListRecent 後台訂單列表：可選 status 篩選，依 id 由新到舊取 limit 筆
+func (r *RideRepository) ListRecent(status *int16, limit int) ([]AdminRideRow, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	q := r.db.Model(&model.Ride{}).
+		Select("id", "customer_id", "driver_id", "status", "pickup_address", "requested_at", "completed_at", "distance_m").
+		Order("id DESC").Limit(limit)
+	if status != nil {
+		q = q.Where("status = ?", *status)
+	}
+	var rows []AdminRideRow
+	err := q.Scan(&rows).Error
+	return rows, err
+}
+
 type AdminRepository struct {
 	db *gorm.DB
 }
