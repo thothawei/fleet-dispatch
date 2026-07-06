@@ -36,6 +36,9 @@ type Config struct {
 
 	ETAPushMinIntervalSec int
 	ETAPushDistThresholdM int
+
+	TrackPartitionMonthsAhead int
+	TrackRetentionMonths      int
 }
 
 // Load 讀取環境變數，缺省值對應本地 docker-compose
@@ -62,6 +65,9 @@ func Load() (*Config, error) {
 		DriverOfflineSec:        getEnvInt("DRIVER_OFFLINE_SEC", 60),
 		ETAPushMinIntervalSec:   getEnvInt("ETA_PUSH_MIN_INTERVAL_SEC", 30),
 		ETAPushDistThresholdM:   getEnvInt("ETA_PUSH_DIST_THRESHOLD_M", 300),
+
+		TrackPartitionMonthsAhead: getEnvInt("TRACK_PARTITION_MONTHS_AHEAD", 2),
+		TrackRetentionMonths:      getEnvInt("TRACK_RETENTION_MONTHS", 0),
 	}
 	return cfg, nil
 }

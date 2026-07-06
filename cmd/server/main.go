@@ -59,6 +59,27 @@ func main() {
 	trackRepo := repository.NewTrackRepository(db)
 	reportRepo := repository.NewReportRepository(db)
 
+	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
+	if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
+		log.Error().Err(err).Msg("初始化軌跡分區失敗")
+	} else {
+		log.Info().Int("months_ahead", cfg.TrackPartitionMonthsAhead).Msg("軌跡分區已確保")
+	}
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
+				log.Error().Err(err).Msg("軌跡分區維護失敗")
+			}
+			if dropped, err := trackRepo.DropOldTrackPartitions(cfg.TrackRetentionMonths); err != nil {
+				log.Error().Err(err).Msg("清理舊軌跡分區失敗")
+			} else if len(dropped) > 0 {
+				log.Info().Strs("dropped", dropped).Msg("已清理舊軌跡分區")
+			}
+		}
+	}()
+
 	// Infrastructure
 	redisStore := redisstore.NewStore(redisClient, cfg.DriverOfflineSec)
 	osrm := osrmclient.NewClient(cfg.OSRMURL)

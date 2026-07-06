@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -297,6 +298,64 @@ type TrackRepository struct {
 
 func NewTrackRepository(db *gorm.DB) *TrackRepository {
 	return &TrackRepository{db: db}
+}
+
+// EnsureTrackPartitions 確保「當月 ~ 當月+monthsAhead」的月分區都存在（冪等，可安全重複執行）。
+// 邊界一律用 UTC 午夜（與 migration 建的分區一致），避免連線時區不同造成重疊。
+func (r *TrackRepository) EnsureTrackPartitions(monthsAhead int) error {
+	now := time.Now().UTC()
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i <= monthsAhead; i++ {
+		m := start.AddDate(0, i, 0)
+		next := m.AddDate(0, 1, 0)
+		name := fmt.Sprintf("ride_tracks_%04d_%02d", m.Year(), int(m.Month()))
+		stmt := fmt.Sprintf(
+			`CREATE TABLE IF NOT EXISTS %s PARTITION OF ride_tracks FOR VALUES FROM ('%s') TO ('%s')`,
+			name,
+			m.Format("2006-01-02")+" 00:00:00+00",
+			next.Format("2006-01-02")+" 00:00:00+00",
+		)
+		if err := r.db.Exec(stmt).Error; err != nil {
+			return fmt.Errorf("建立分區 %s 失敗: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// DropOldTrackPartitions 刪除早於保留期的舊月分區（retentionMonths<=0 表示不刪，預設關閉）。回傳刪除的分區名
+func (r *TrackRepository) DropOldTrackPartitions(retentionMonths int) ([]string, error) {
+	if retentionMonths <= 0 {
+		return nil, nil
+	}
+	now := time.Now().UTC()
+	cutoff := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, -retentionMonths, 0)
+
+	var names []string
+	err := r.db.Raw(`
+		SELECT c.relname FROM pg_inherits i
+		JOIN pg_class c ON c.oid = i.inhrelid
+		JOIN pg_class p ON p.oid = i.inhparent
+		WHERE p.relname = 'ride_tracks'
+	`).Scan(&names).Error
+	if err != nil {
+		return nil, err
+	}
+
+	var dropped []string
+	for _, name := range names {
+		var y, mo int
+		if _, e := fmt.Sscanf(name, "ride_tracks_%d_%d", &y, &mo); e != nil || mo < 1 || mo > 12 {
+			continue
+		}
+		part := time.Date(y, time.Month(mo), 1, 0, 0, 0, 0, time.UTC)
+		if part.Before(cutoff) {
+			if e := r.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", name)).Error; e != nil {
+				return dropped, e
+			}
+			dropped = append(dropped, name)
+		}
+	}
+	return dropped, nil
 }
 
 func (r *TrackRepository) Insert(rideID, driverID int64, lat, lng float64) error {
