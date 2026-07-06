@@ -25,3 +25,15 @@
 - **ride_tracks**：PostgreSQL 宣告式分區（2026-07、2026-08）。
 - **圍籬**：`ST_DWithin` 100m 觸發「司機已抵達」。
 - **報表**：window function 彙總每日趟數、里程、平均接客時間。
+
+## 2026-07-06 · M5-WS WebSocket 即時通道
+
+- **選 gorilla/websocket**：Go 生態最成熟穩定的 WS 函式庫；作品階段夠用。
+- **Hub 單 goroutine 序列化**：register/unregister/publish 全走 channel 進單一迴圈，
+  免鎖、無 map 競態（`-race` 驗證通過）。慢客戶端佇列滿則丟該則事件，不阻塞 Hub。
+- **事件發佈與 LINE 推播並存**：在既有 `line.Push*` 呼叫旁「多發一份」結構化事件，
+  派單/訂單業務邏輯零改動；未接 Hub 時 Publisher 為 nil，服務照常運作（既有測試不回歸）。
+- **通用角色 JWT**：新增 `SubjectClaims{Role,SubjectID}` 同時支援 driver/customer/admin，
+  並相容既有司機 `DriverClaims` token（`ParseToken` 退回機制）。
+- **邊界**：WS 目前僅單向下推（伺服器 → 前端）；上行（如司機定位）仍走既有 REST。
+  乘客/後台 WS 訂閱需各自的認證（乘客認證、admin 認證為 M5 後續 sub-plan）。
