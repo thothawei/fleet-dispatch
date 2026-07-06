@@ -49,3 +49,12 @@
   即時更新由已完成的 WS `driver.location`（admin 廣播）承擔。
 - **測試 helper**：新增 `newMigratedTestDB`（對 testcontainer 跑真 db/migrations，得完整 schema），
   取代既有 `newTestDB`（只建最小 rides 表）供需要完整 schema 的整合測試使用。
+
+## 2026-07-06 · M5-CUSTOMER-AUTH 乘客認證
+
+- **line_user_id + 密碼 JWT**：鏡射司機（DriverRegistry）；乘客 token 帶 `customers.id`，
+  與 dispatch/tracking 發佈的 `Recipient{RoleCustomer, ride.CustomerID}` 對齊，
+  登入後即可用該 token 連 WS 收自己這趟的事件（WS handler 已支援 role=customer，無需改）。
+- **前向相容 LINE Login**：身分鍵仍是 line_user_id；日後接 LINE Login 只換驗證方式，
+  不動身分模型（此為設計 §12.4「可改決策」的踏腳石實作）。
+- **測試**：CustomerRegistry 用假 store 做純邏輯單元測試；repo 層用 newMigratedTestDB。
