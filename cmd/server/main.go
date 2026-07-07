@@ -118,7 +118,7 @@ func main() {
 	healthHandler := handler.NewHealthHandler(db, redisClient)
 	lineHandler := handler.NewLineWebhookHandler(rideService, dispatchService, driverRepo, lineClient)
 	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, cfg.JWTSecret, cfg.JWTExpiryHours)
-	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService)
+	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
 	reportHandler := handler.NewReportHandler(reportRepo)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 
@@ -151,6 +151,13 @@ func main() {
 		// 乘客：註冊 / 登入（公開）
 		api.POST("/customer/register", customerHandler.Register)
 		api.POST("/customer/login", customerHandler.Login)
+
+		// 受乘客 JWT 保護：App 下單
+		customerAuthed := api.Group("")
+		customerAuthed.Use(middleware.CustomerAuth(cfg.JWTSecret))
+		{
+			customerAuthed.POST("/rides", rideHandler.Create)
+		}
 
 		// 受 JWT 保護：司機操作（driver_id 取自 token，不信任 body）
 		authed := api.Group("")
