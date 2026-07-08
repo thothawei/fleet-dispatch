@@ -48,7 +48,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 > 逐項驗收條件見 [gap-analysis-plan](2026-07-07-gap-analysis-plan.md)；App/後台各自的清單在
 > `line-fleet-app/docs/TODO.md`、`line-fleet-admin/docs/TODO.md`。
 
-1. **M7 乘客端收尾**（主鏈路已通，補 polish）：填 Google Maps API key 顯示地圖選點與即時追蹤地圖；B5 評分/付款入口（依賴 Phase C）；端到端模擬器整條驗收截圖。
+1. **M7 乘客端收尾**（主鏈路已通）：~~B6 計畫~~ ✅ 2026-07-08（[2026-07-08-m7-customer-app.md](superpowers/plans/2026-07-08-m7-customer-app.md)）。仍待：Maps API key、地圖追蹤（Slice 5）、B5 評分/付款（Phase C）、端到端驗收截圖。
 2. ~~**A1 司機背景定位**~~：✅ 已實作（2026-07-08，line-fleet-app）。`getPositionStream` + Android 前景服務通知；**待真機驗收**鎖屏 10 分鐘後座標仍更新。
 3. **A2/D1 FCM 推播**：App 被殺收派單。需推播抽象層 + `device_tokens` 表（migration 未建）+ Firebase 專案 + 真裝置。
 4. ~~**P1 小尾巴**~~：✅ 已完成（2026-07-08）。`ride.assigned` 事件已帶 `dropoff_address/lat/lng`；司機接單前可預覽目的地。LINE 叫車仍無目的地（設計取捨）。
