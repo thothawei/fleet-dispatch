@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,9 +14,11 @@ import (
 	"line-fleet-dispatch/internal/service"
 )
 
-// AdminHandler 後台唯讀 API + 登入
+// AdminHandler 後台 API + 登入
 type AdminHandler struct {
 	admins         *service.AdminRegistry
+	adminOps       *service.AdminOperations
+	dispatchSettings *service.DispatchSettings
 	drivers        *repository.DriverRepository
 	rides          *repository.RideRepository
 	tracks         *repository.TrackRepository
@@ -27,6 +30,8 @@ type AdminHandler struct {
 
 func NewAdminHandler(
 	admins *service.AdminRegistry,
+	adminOps *service.AdminOperations,
+	dispatchSettings *service.DispatchSettings,
 	drivers *repository.DriverRepository,
 	rides *repository.RideRepository,
 	tracks *repository.TrackRepository,
@@ -36,7 +41,8 @@ func NewAdminHandler(
 	jwtExpiryHours int,
 ) *AdminHandler {
 	return &AdminHandler{
-		admins: admins, drivers: drivers, rides: rides, tracks: tracks,
+		admins: admins, adminOps: adminOps, dispatchSettings: dispatchSettings,
+		drivers: drivers, rides: rides, tracks: tracks,
 		reports: reports, redis: redis, jwtSecret: jwtSecret, jwtExpiryHours: jwtExpiryHours,
 	}
 }
@@ -140,4 +146,78 @@ func (h *AdminHandler) DailyReport(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"date": date, "drivers": rows})
+}
+
+// PatchDriverStatus PATCH /api/admin/drivers/:id/status — 啟用/停用司機
+func (h *AdminHandler) PatchDriverStatus(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	driver, err := h.adminOps.SetDriverEnabled(c.Request.Context(), id, req.Enabled)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "找不到司機"})
+		case errors.Is(err, service.ErrDriverOnTrip):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"driver": driver})
+}
+
+// GetDispatchSettings GET /api/admin/settings/dispatch
+func (h *AdminHandler) GetDispatchSettings(c *gin.Context) {
+	c.JSON(http.StatusOK, h.dispatchSettings.JSON())
+}
+
+// PutDispatchSettings PUT /api/admin/settings/dispatch
+func (h *AdminHandler) PutDispatchSettings(c *gin.Context) {
+	var req struct {
+		RadiusM         *int `json:"radius_m"`
+		MaxDrivers      *int `json:"max_drivers"`
+		OfferTimeoutSec *int `json:"offer_timeout_sec"`
+		MaxAttempts     *int `json:"max_attempts"`
+		RateLimitPerMin *int `json:"rate_limit_per_min"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	if err := h.dispatchSettings.Update(req.RadiusM, req.MaxDrivers, req.OfferTimeoutSec, req.MaxAttempts, req.RateLimitPerMin); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, h.dispatchSettings.JSON())
+}
+
+// CancelRide POST /api/admin/rides/:id/cancel — 後台強制取消
+func (h *AdminHandler) CancelRide(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	msg, err := h.adminOps.CancelRideByAdmin(c.Request.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "找不到訂單"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": msg})
 }

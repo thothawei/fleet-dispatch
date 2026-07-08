@@ -64,6 +64,10 @@ func (h *DriverHandler) Online(c *gin.Context) {
 	driverID := middleware.DriverIDFromCtx(c)
 	d, err := h.drivers.GoOnline(driverID)
 	if err != nil {
+		if errors.Is(err, service.ErrDriverDisabled) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

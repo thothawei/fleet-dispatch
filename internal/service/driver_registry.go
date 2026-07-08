@@ -57,11 +57,14 @@ func (s *DriverRegistry) Me(driverID int64) (*model.Driver, error) {
 }
 
 // GoOnline 顯式上線：設為待命（Idle），重新進入派單池。
-// 載客中（OnTrip）則維持原狀不降級，直接回傳目前狀態。
+// 載客中（OnTrip）則維持原狀不降級；已停用（Disabled）回 ErrDriverDisabled。
 func (s *DriverRegistry) GoOnline(driverID int64) (*model.Driver, error) {
 	d, err := s.drivers.FindByID(driverID)
 	if err != nil {
 		return nil, err
+	}
+	if d.Status == constants.DriverStatusDisabled {
+		return nil, ErrDriverDisabled
 	}
 	if d.Status == constants.DriverStatusOnTrip {
 		return d, nil

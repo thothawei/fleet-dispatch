@@ -25,10 +25,7 @@ type DispatchService struct {
 	redis        *redisstore.Store
 	line         *lineclient.Client
 	eta          *ETAService
-	radiusM      int
-	maxCount     int
-	offerTimeout time.Duration
-	maxAttempts  int
+	settings     *DispatchSettings
 	publisher    events.Publisher
 }
 
@@ -39,24 +36,21 @@ func NewDispatchService(
 	redis *redisstore.Store,
 	line *lineclient.Client,
 	eta *ETAService,
-	radiusM, maxCount, offerTimeoutSec, maxAttempts int,
+	settings *DispatchSettings,
 	publisher events.Publisher,
 ) *DispatchService {
-	if maxAttempts < 1 {
-		maxAttempts = 1
+	if settings == nil {
+		settings = NewDispatchSettings(3000, 5, 20, 3, 5)
 	}
 	return &DispatchService{
-		drivers:      drivers,
-		rides:        rides,
-		customers:    customers,
-		redis:        redis,
-		line:         line,
-		eta:          eta,
-		radiusM:      radiusM,
-		maxCount:     maxCount,
-		offerTimeout: time.Duration(offerTimeoutSec) * time.Second,
-		maxAttempts:  maxAttempts,
-		publisher:    publisher,
+		drivers:   drivers,
+		rides:     rides,
+		customers: customers,
+		redis:     redis,
+		line:      line,
+		eta:       eta,
+		settings:  settings,
+		publisher: publisher,
 	}
 }
 
@@ -93,8 +87,11 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		return err
 	}
 
-	radius := s.radiusM * attempt // 每輪擴大搜尋半徑
-	candidates, err := s.redis.NearbyDriverIDs(ctx, pickupLat, pickupLng, radius, s.maxCount*attempt)
+	radiusM, maxCount, offerTimeoutSec, maxAttempts, _ := s.settings.Snapshot()
+	offerTimeout := time.Duration(offerTimeoutSec) * time.Second
+
+	radius := radiusM * attempt // 每輪擴大搜尋半徑
+	candidates, err := s.redis.NearbyDriverIDs(ctx, pickupLat, pickupLng, radius, maxCount*attempt)
 	if err != nil {
 		return err
 	}
@@ -127,11 +124,11 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 	}
 
 	// 逾時後：最後一輪 → 放棄並取消；否則 → 擴大重派
-	if attempt >= s.maxAttempts {
-		time.AfterFunc(s.offerTimeout, func() { s.giveUpIfUnaccepted(rideID) })
+	if attempt >= maxAttempts {
+		time.AfterFunc(offerTimeout, func() { s.giveUpIfUnaccepted(rideID) })
 		return nil
 	}
-	time.AfterFunc(s.offerTimeout, func() { _ = s.dispatchRound(rideID, attempt+1, offered) })
+	time.AfterFunc(offerTimeout, func() { _ = s.dispatchRound(rideID, attempt+1, offered) })
 	return nil
 }
 

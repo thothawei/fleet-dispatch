@@ -19,13 +19,14 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 ### 後端（line-fleet-dispatch）
 - **Phase A**：LINE 派單核心、JWT、派單重試/取消/節流、軌跡分區、testcontainers 測試。
 - **M5-WS**：WebSocket hub（`/ws`，events.Hub 單 goroutine，Publisher 注入 dispatch/tracking）。
-- **M5-ADMIN**：admin 認證 + 唯讀後台 API（`/api/admin/` login/fleet/drivers/rides/rides/:id/reports/daily）。
+- **M5-ADMIN**：admin 認證 + 後台 API（唯讀 + **P2 寫入** 2026-07-08）。
 - **M5-CUSTOMER-AUTH**：乘客 line_user_id + 密碼 JWT，解鎖乘客 WS 訂閱。
 - **後台帳號登入**：email→username（migration 000007）；種子帳號 **admin/admin**。
 - **P0 乘客 App 端點（2026-07-07）**：`POST /api/rides` 下單、`GET /api/customer/rides/active`、`GET /api/customer/rides/:id`、`POST /api/rides/:id/cancel-by-customer`。
 - **P1 司機 App 端點（2026-07-08）**：`/api/driver/me`、online/offline、`/api/driver/rides/active`、decline。
 - **安全 + 資料層（2026-07-08）**：`/track` 補 MultiAuth；公開 `/api/reports/daily` 下架；`GeoPoint.Scan` 修復；`Ride`/`GeoPoint` JSON tag。
 - **dropoff 鏈路（2026-07-08）**：App 下單寫入 `dropoff_address/lat/lng`；`rides/active` 回傳 dropoff；`ride.accepted` / **`ride.assigned`** WS 事件帶 dropoff；pickup 回應帶 `dropoff_address`。
+- **P2 後台寫入 API（2026-07-08）**：司機啟停、派單參數 GET/PUT、後台強制取消。
 - **smoke_test.sh 同步（2026-07-08）**：track 帶司機 JWT、日報改 admin JWT；對齊 M5 安全改動。
 
 ### 司機端 App（line-fleet-app，Flutter）— M6 主鏈路完成
@@ -53,7 +54,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 3. **A2/D1 FCM 推播**：App 被殺收派單。需推播抽象層 + `device_tokens` 表（migration 未建）+ Firebase 專案 + 真裝置。
 4. ~~**P1 小尾巴**~~：✅ 已完成（2026-07-08）。`ride.assigned` 事件已帶 `dropoff_address/lat/lng`；司機接單前可預覽目的地。LINE 叫車仍無目的地（設計取捨）。
 5. **D4 `ride_events` 審計表**：migrations 只到 000007，未建。
-6. **後台寫入**：D2 司機停用（須配派單池）+ C2 UI、D3 派單參數設定 + C3 UI、admin 強制取消 — admin 路由目前全 GET。
+6. ~~**後台寫入（後端 P2）**~~：✅ 2026-07-08 API 已完成。**待前端** C2 司機啟停 UI、C3 派單參數頁、訂單強制取消按鈕。
 7. **品質**：C4 admin 無測試；C5 各頁視覺截圖驗證未做；~~A4 M6 計畫勾選~~ ✅ 2026-07-08 已回填（`docs/superpowers/plans/2026-07-07-m6-driver-app.md`，證據以 commit/`flutter test` 為主；A1 真機長跑仍待）。本機 Go 整合測試需完整 Xcode（CGO stdlib.h）。
 8. **DevOps**：~~E2 App CI~~ ✅ 2026-07-08（`line-fleet-app` `.github/workflows/flutter-ci.yml`：analyze + test）。後端／admin 尚無 CI；E3 生產部署（現僅 dev docker-compose）；E4 監控（Prometheus/Grafana）。
 9. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D6 RBAC 多角色；D7 Phase C 計費/評分/金流/metrics。

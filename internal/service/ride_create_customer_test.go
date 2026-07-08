@@ -22,7 +22,7 @@ func TestCreateByCustomer_寫入Dropoff(t *testing.T) {
 		customers,
 		redis,
 		lineclient.NewClient(""),
-		nil, 3000, 5, 20, 1, nil,
+		nil, NewDispatchSettings(3000, 5, 20, 1, 5), nil,
 	)
 	svc := NewRideService(customers, rides, redis, dispatch)
 

@@ -23,6 +23,9 @@
 | POST | `/api/rides/:id/{accept,pickup,complete,cancel,decline}` | driver JWT | 司機行程操作 |
 | GET | `/api/rides/:id/track` | MultiAuth JWT | 軌跡 GeoJSON（本趟乘客/司機/admin） |
 | GET | `/api/admin/{fleet,drivers,rides,rides/:id,reports/daily}` | admin JWT | 後台唯讀 |
+| PATCH | `/api/admin/drivers/:id/status` | admin JWT | 司機啟用/停用 |
+| GET·PUT | `/api/admin/settings/dispatch` | admin JWT | 派單參數（執行期可調） |
+| POST | `/api/admin/rides/:id/cancel` | admin JWT | 後台強制取消 |
 
 > 已下架：`GET /api/reports/daily`（公開版，2026-07-08 移除）。
 
@@ -56,13 +59,13 @@
 
 ---
 
-## P2 — 後台寫入 API（現全唯讀，配合前端 C2/C3）
+## P2 — 後台寫入 API ✅ 全數完成（2026-07-08）
 
 | # | Method | Path | 認證 | 說明 |
 |---|---|---|---|---|
-| 9 | PATCH | `/api/admin/drivers/:id/status` | admin JWT | 停用/啟用司機。**須配合派單池**：停用者不得上線、不被派單，否則是假按鈕 |
-| 10 | GET·PUT | `/api/admin/settings/dispatch` | admin JWT | 讀/改派單參數（逾時秒數、搜尋半徑、節流門檻），現多為 env/常數 |
-| 11 | POST | `/api/admin/rides/:id/cancel` | admin JWT | 後台強制取消訂單 複用 `DispatchService.CancelBy*` |
+| 9 | PATCH | `/api/admin/drivers/:id/status` | admin JWT | ✅ `AdminHandler.PatchDriverStatus`→`AdminOperations.SetDriverEnabled`。body `{"enabled":true/false}`；停用→`DriverStatusDisabled(3)`+移出 Redis GEO；載客中停用回 409；啟用→Offline |
+| 10 | GET·PUT | `/api/admin/settings/dispatch` | admin JWT | ✅ 執行期 `DispatchSettings`（記憶體，重啟還原 env）：`radius_m`/`max_drivers`/`offer_timeout_sec`/`max_attempts`/`rate_limit_per_min` |
+| 11 | POST | `/api/admin/rides/:id/cancel` | admin JWT | ✅ `AdminHandler.CancelRide`→`CancelRideByAdmin`，複用 `cancelActiveRide`（已上車不可取消） |
 | 12 | POST·GET·DELETE | `/api/admin/admins` | admin JWT | 後台使用者管理（開/停後台帳號）；配 RBAC 才有意義（優先度依需求） |
 
 ---
@@ -114,7 +117,7 @@
 ~~安全洞(track 補認證 / reports 下架)~~ + ~~資料層(GeoPoint.Scan / JSON tag / dropoff)~~ ✅ 已完成（2026-07-08）
 ~~P1(#5~#8 司機 App 可靠性)~~ ✅ 已完成（2026-07-08）
 
-  → P2(#9,#10,#11 後台寫入) 與前端 C2/C3 對接
+  → ~~P2(#9,#10,#11 後台寫入)~~ ✅ 已完成（2026-07-08），可對接前端 C2/C3
   → P3(#13,#14 推播) 配合 App A2/FCM
   → P4 Phase C 依商業需求
 ```

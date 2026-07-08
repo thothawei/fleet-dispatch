@@ -17,7 +17,7 @@ func TestCancelByCustomerID_他人訂單回Forbidden(t *testing.T) {
 	customers := repository.NewCustomerRepository(db)
 	drivers := repository.NewDriverRepository(db)
 	rides := repository.NewRideRepository(db)
-	dispatch := NewDispatchService(drivers, rides, customers, redisStore, lineclient.NewClient(""), nil, 3000, 5, 20, 1, nil)
+	dispatch := NewDispatchService(drivers, rides, customers, redisStore, lineclient.NewClient(""), nil, NewDispatchSettings(3000, 5, 20, 1, 5), nil)
 
 	owner, err := customers.FindOrCreateByLineUserID("U_cancel_owner", "乘客A")
 	if err != nil {
@@ -51,7 +51,7 @@ func TestCancelByCustomerID_不存在訂單回NotFound(t *testing.T) {
 	customers := repository.NewCustomerRepository(db)
 	drivers := repository.NewDriverRepository(db)
 	rides := repository.NewRideRepository(db)
-	dispatch := NewDispatchService(drivers, rides, customers, redisStore, lineclient.NewClient(""), nil, 3000, 5, 20, 1, nil)
+	dispatch := NewDispatchService(drivers, rides, customers, redisStore, lineclient.NewClient(""), nil, NewDispatchSettings(3000, 5, 20, 1, 5), nil)
 
 	_, err := dispatch.CancelByCustomerID(context.Background(), 1, 999999)
 	if !errors.Is(err, ErrNotFound) {
@@ -66,7 +66,7 @@ func TestCancelByCustomerID_已上車無法取消(t *testing.T) {
 	customers := repository.NewCustomerRepository(db)
 	drivers := repository.NewDriverRepository(db)
 	rides := repository.NewRideRepository(db)
-	dispatch := NewDispatchService(drivers, rides, customers, redisStore, lineclient.NewClient(""), nil, 3000, 5, 20, 1, nil)
+	dispatch := NewDispatchService(drivers, rides, customers, redisStore, lineclient.NewClient(""), nil, NewDispatchSettings(3000, 5, 20, 1, 5), nil)
 
 	cust, err := customers.FindOrCreateByLineUserID("U_cancel_pickedup", "測試乘客")
 	if err != nil {
@@ -97,7 +97,7 @@ func TestCancelByCustomerID_本人取消釋放鎖與司機回待命(t *testing.T
 	customers := repository.NewCustomerRepository(db)
 	drivers := repository.NewDriverRepository(db)
 	rides := repository.NewRideRepository(db)
-	dispatch := NewDispatchService(drivers, rides, customers, redisStore, lineclient.NewClient(""), nil, 3000, 5, 20, 1, nil)
+	dispatch := NewDispatchService(drivers, rides, customers, redisStore, lineclient.NewClient(""), nil, NewDispatchSettings(3000, 5, 20, 1, 5), nil)
 
 	cust, err := customers.FindOrCreateByLineUserID("U_cancel_ok", "測試乘客")
 	if err != nil {

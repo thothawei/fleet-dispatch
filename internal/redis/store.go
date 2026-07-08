@@ -165,6 +165,16 @@ func (s *Store) OnlineDriverLocations(ctx context.Context) ([]DriverLoc, error) 
 	return out, nil
 }
 
+// RemoveDriverLocation 從 GEO 與位置 hash 移除司機（後台停用時移出派單池）。
+func (s *Store) RemoveDriverLocation(ctx context.Context, driverID int64) error {
+	idStr := strconv.FormatInt(driverID, 10)
+	pipe := s.client.Pipeline()
+	pipe.ZRem(ctx, driversGeoKey, idStr)
+	pipe.Del(ctx, fmt.Sprintf("driver:%s:loc", idStr))
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
 // AllowRateLimit 叫車限流，回傳是否允許
 func (s *Store) AllowRateLimit(ctx context.Context, lineUserID string, maxPerMin int) (bool, error) {
 	key := fmt.Sprintf("ratelimit:%s", lineUserID)

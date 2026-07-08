@@ -91,11 +91,15 @@ func main() {
 	etaService := service.NewETAService(osrm)
 	lineClient := lineclient.NewClient(cfg.LineChannelAccessToken)
 
+	dispatchSettings := service.NewDispatchSettings(
+		cfg.DispatchRadiusM, cfg.DispatchMaxDrivers,
+		cfg.DispatchOfferTimeoutSec, cfg.DispatchMaxAttempts, 5,
+	)
+
 	// Services
 	dispatchService := service.NewDispatchService(
 		driverRepo, rideRepo, customerRepo, redisStore, lineClient, etaService,
-		cfg.DispatchRadiusM, cfg.DispatchMaxDrivers,
-		cfg.DispatchOfferTimeoutSec, cfg.DispatchMaxAttempts,
+		dispatchSettings,
 		hub,
 	)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
@@ -128,7 +132,10 @@ func main() {
 		log.Error().Err(err).Msg("建立種子管理員失敗")
 	}
 	adminHandler := handler.NewAdminHandler(
-		adminRegistry, driverRepo, rideRepo, trackRepo, reportRepo, redisStore,
+		adminRegistry,
+		service.NewAdminOperations(driverRepo, dispatchService, redisStore, dispatchSettings),
+		dispatchSettings,
+		driverRepo, rideRepo, trackRepo, reportRepo, redisStore,
 		cfg.JWTSecret, cfg.JWTExpiryHours,
 	)
 
@@ -190,6 +197,10 @@ func main() {
 			adminG.GET("/rides", adminHandler.Rides)
 			adminG.GET("/rides/:id", adminHandler.RideDetail)
 			adminG.GET("/reports/daily", adminHandler.DailyReport)
+			adminG.PATCH("/drivers/:id/status", adminHandler.PatchDriverStatus)
+			adminG.GET("/settings/dispatch", adminHandler.GetDispatchSettings)
+			adminG.PUT("/settings/dispatch", adminHandler.PutDispatchSettings)
+			adminG.POST("/rides/:id/cancel", adminHandler.CancelRide)
 		}
 	}
 

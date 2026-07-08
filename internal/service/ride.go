@@ -44,7 +44,7 @@ func NewRideService(
 
 // CreateFromLocation 收到 LINE 位置訊息後建立訂單並觸發派單
 func (s *RideService) CreateFromLocation(ctx context.Context, req RideRequest) (*model.Ride, error) {
-	allowed, err := s.redis.AllowRateLimit(ctx, req.LineUserID, 5)
+	allowed, err := s.redis.AllowRateLimit(ctx, req.LineUserID, s.rateLimitPerMin())
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +80,14 @@ func (s *RideService) CreateFromLocation(ctx context.Context, req RideRequest) (
 	return ride, nil
 }
 
+func (s *RideService) rateLimitPerMin() int {
+	if s.dispatch == nil || s.dispatch.settings == nil {
+		return 5
+	}
+	_, _, _, _, rate := s.dispatch.settings.Snapshot()
+	return rate
+}
+
 // CustomerCreateRequest 乘客 App 下單輸入（含選填目的地）。
 type CustomerCreateRequest struct {
 	PickupLat, PickupLng float64
@@ -107,7 +115,7 @@ func (s *RideService) CreateByCustomer(
 		return nil, err
 	}
 
-	allowed, err := s.redis.AllowRateLimit(ctx, customer.LineUserID, 5)
+	allowed, err := s.redis.AllowRateLimit(ctx, customer.LineUserID, s.rateLimitPerMin())
 	if err != nil {
 		return nil, err
 	}
