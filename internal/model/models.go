@@ -178,3 +178,20 @@ type DeviceToken struct {
 func (DeviceToken) TableName() string {
 	return "device_tokens"
 }
+
+// RideEvent 訂單狀態轉換審計（D4）。
+type RideEvent struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	RideID     int64     `gorm:"column:ride_id;not null" json:"ride_id"`
+	FromStatus *int16    `gorm:"column:from_status" json:"from_status"`
+	ToStatus   int16     `gorm:"column:to_status;not null" json:"to_status"`
+	EventType  string    `gorm:"column:event_type;not null" json:"event_type"`
+	ActorRole  string    `gorm:"column:actor_role;not null;default:''" json:"actor_role"`
+	ActorID    *int64    `gorm:"column:actor_id" json:"actor_id"`
+	Note       string    `gorm:"not null;default:''" json:"note"`
+	CreatedAt  time.Time `gorm:"not null" json:"created_at"`
+}
+
+func (RideEvent) TableName() string {
+	return "ride_events"
+}

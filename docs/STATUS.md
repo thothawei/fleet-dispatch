@@ -54,7 +54,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 3. ~~**A2/D1 FCM 推播（後端）**~~：✅ 2026-07-08 D1 契約落地——`device_tokens` migration、`Notifier` stub（LogPusher）、
    `POST/DELETE /api/{driver,customer}/device-token`、派單時並發 App 推播。**真 FCM/APNs 與 App A2 註冊 token 仍待** Firebase／真裝置。
 4. ~~**P1 小尾巴**~~：✅ 已完成（2026-07-08）。`ride.assigned` 事件已帶 `dropoff_address/lat/lng`；司機接單前可預覽目的地。LINE 叫車仍無目的地（設計取捨）。
-5. **D4 `ride_events` 審計表**：migrations 只到 000007，未建。
+5. ~~**D4 `ride_events` 審計表**~~：✅ 2026-07-08。migration `000009`、狀態轉換寫入（叫車/派單/接單/抵達/上車/完成/取消/重派）、`GET /api/admin/rides/:id` 回傳 `events`。
 6. ~~**後台寫入（後端 P2）**~~：✅ 2026-07-08 API 已完成。**待前端** C2 司機啟停 UI、C3 派單參數頁、訂單強制取消按鈕。
 7. **品質**：C4 admin 無測試；C5 各頁視覺截圖驗證未做；~~A4 M6 計畫勾選~~ ✅ 2026-07-08 已回填（`docs/superpowers/plans/2026-07-07-m6-driver-app.md`，證據以 commit/`flutter test` 為主；A1 真機長跑仍待）。本機 Go 整合測試需完整 Xcode（CGO stdlib.h）。
 8. **DevOps**：~~E2 App CI~~ ✅ 2026-07-08（`line-fleet-app` `.github/workflows/flutter-ci.yml`：analyze + test）。後端／admin 尚無 CI；E3 生產部署（現僅 dev docker-compose）；E4 監控（Prometheus/Grafana）。

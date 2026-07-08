@@ -61,6 +61,7 @@ func main() {
 	trackRepo := repository.NewTrackRepository(db)
 	reportRepo := repository.NewReportRepository(db)
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
+	rideEventRepo := repository.NewRideEventRepository(db)
 
 	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
 	if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
@@ -106,13 +107,16 @@ func main() {
 	)
 	appNotify := notify.NewDispatcher(deviceTokenRepo, notify.LogPusher{})
 	dispatchService.SetAppNotifier(appNotify)
+	dispatchService.SetRideEvents(rideEventRepo)
 	deviceTokenService := service.NewDeviceTokenService(deviceTokenRepo)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
+	rideService.SetRideEvents(rideEventRepo)
 	trackingService := service.NewTrackingService(
 		driverRepo, rideRepo, trackRepo, redisStore, lineClient, dispatchService,
 		cfg.ETAPushMinIntervalSec, cfg.ETAPushDistThresholdM,
 		hub,
 	)
+	trackingService.SetRideEvents(rideEventRepo)
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
 
@@ -141,7 +145,7 @@ func main() {
 		adminRegistry,
 		service.NewAdminOperations(driverRepo, dispatchService, redisStore, dispatchSettings),
 		dispatchSettings,
-		driverRepo, rideRepo, trackRepo, reportRepo, redisStore,
+		driverRepo, rideRepo, trackRepo, rideEventRepo, reportRepo, redisStore,
 		cfg.JWTSecret, cfg.JWTExpiryHours,
 	)
 

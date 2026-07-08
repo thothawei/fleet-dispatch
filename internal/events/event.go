@@ -13,13 +13,23 @@ const (
 
 // 事件型別
 const (
-	TypeRideAssigned   = "ride.assigned"   // 已派單給司機（待接）
-	TypeRideAccepted   = "ride.accepted"   // 司機已接單
-	TypeDriverLocation = "driver.location" // 司機位置更新（後台車隊 / 乘客追蹤）
-	TypeDriverArrived  = "driver.arrived"  // 司機進入上車圍籬
-	TypeRidePickedUp   = "ride.picked_up"  // 乘客已上車
-	TypeRideCompleted  = "ride.completed"  // 行程完成
-	TypeRideCancelled  = "ride.cancelled"  // 行程取消
+	TypeRideRequested     = "ride.requested"     // 乘客叫車
+	TypeRideAssigned      = "ride.assigned"      // 已派單給司機（待接）
+	TypeRideAccepted      = "ride.accepted"      // 司機已接單
+	TypeDriverLocation    = "driver.location"    // 司機位置更新（後台車隊 / 乘客追蹤）
+	TypeDriverArrived     = "driver.arrived"     // 司機進入上車圍籬
+	TypeRidePickedUp      = "ride.picked_up"     // 乘客已上車
+	TypeRideCompleted     = "ride.completed"     // 行程完成
+	TypeRideCancelled     = "ride.cancelled"     // 行程取消
+	TypeRideRedispatched  = "ride.redispatched"  // 司機放棄後重回待派
+)
+
+// 審計 actor_role
+const (
+	ActorCustomer = "customer"
+	ActorDriver   = "driver"
+	ActorAdmin    = "admin"
+	ActorSystem   = "system"
 )
 
 // Recipient 事件收件人。ID=0 代表該角色的廣播（例如後台車隊看板）。

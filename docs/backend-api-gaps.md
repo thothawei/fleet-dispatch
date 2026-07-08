@@ -125,6 +125,6 @@
 ## 落地備忘
 
 - 全部沿用既有 `Handler → Service → Repository` 分層；下單/取消優先包裝既有 service，不重寫派單。
-- 寫入端點記得補 `ride_events` 審計（gap-plan D4）與整合測試（testcontainers 既有模式）。
+- 寫入端點的 `ride_events` 審計（gap-plan D4）✅ 2026-07-08（migration `000009` + 狀態轉換寫入 + admin 詳情 `events`）。整合測試（testcontainers）仍可後補。
 - 完成一段 → 對照驗收實跑 → commit + push（main，thothawei 金鑰）→ 回填本清單勾選框。
 - 煙霧測試：`bash scripts/smoke_test.sh`（track 帶司機 JWT、日報帶 admin JWT）。

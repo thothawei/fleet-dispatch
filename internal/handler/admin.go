@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"line-fleet-dispatch/internal/auth"
+	"line-fleet-dispatch/internal/model"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
 	"line-fleet-dispatch/internal/service"
@@ -16,16 +17,17 @@ import (
 
 // AdminHandler 後台 API + 登入
 type AdminHandler struct {
-	admins         *service.AdminRegistry
-	adminOps       *service.AdminOperations
+	admins           *service.AdminRegistry
+	adminOps         *service.AdminOperations
 	dispatchSettings *service.DispatchSettings
-	drivers        *repository.DriverRepository
-	rides          *repository.RideRepository
-	tracks         *repository.TrackRepository
-	reports        *repository.ReportRepository
-	redis          *redisstore.Store
-	jwtSecret      string
-	jwtExpiryHours int
+	drivers          *repository.DriverRepository
+	rides            *repository.RideRepository
+	tracks           *repository.TrackRepository
+	rideEvents       *repository.RideEventRepository
+	reports          *repository.ReportRepository
+	redis            *redisstore.Store
+	jwtSecret        string
+	jwtExpiryHours   int
 }
 
 func NewAdminHandler(
@@ -35,6 +37,7 @@ func NewAdminHandler(
 	drivers *repository.DriverRepository,
 	rides *repository.RideRepository,
 	tracks *repository.TrackRepository,
+	rideEvents *repository.RideEventRepository,
 	reports *repository.ReportRepository,
 	redis *redisstore.Store,
 	jwtSecret string,
@@ -42,7 +45,7 @@ func NewAdminHandler(
 ) *AdminHandler {
 	return &AdminHandler{
 		admins: admins, adminOps: adminOps, dispatchSettings: dispatchSettings,
-		drivers: drivers, rides: rides, tracks: tracks,
+		drivers: drivers, rides: rides, tracks: tracks, rideEvents: rideEvents,
 		reports: reports, redis: redis, jwtSecret: jwtSecret, jwtExpiryHours: jwtExpiryHours,
 	}
 }
@@ -130,7 +133,18 @@ func (h *AdminHandler) RideDetail(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ride": ride, "track_geojson": geojson})
+	var evts []model.RideEvent
+	if h.rideEvents != nil {
+		evts, err = h.rideEvents.ListByRideID(id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if evts == nil {
+		evts = []model.RideEvent{}
+	}
+	c.JSON(http.StatusOK, gin.H{"ride": ride, "track_geojson": geojson, "events": evts})
 }
 
 // DailyReport GET /api/admin/reports/daily?date=2026-07-06

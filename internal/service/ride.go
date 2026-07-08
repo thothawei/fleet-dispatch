@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"line-fleet-dispatch/internal/constants"
+	"line-fleet-dispatch/internal/events"
 	"line-fleet-dispatch/internal/model"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
@@ -26,6 +27,7 @@ type RideService struct {
 	rides     *repository.RideRepository
 	redis     *redisstore.Store
 	dispatch  *DispatchService
+	audit     rideAuditor
 }
 
 func NewRideService(
@@ -40,6 +42,11 @@ func NewRideService(
 		redis:     redis,
 		dispatch:  dispatch,
 	}
+}
+
+// SetRideEvents 注入訂單狀態審計寫入；可選。
+func (s *RideService) SetRideEvents(repo *repository.RideEventRepository) {
+	s.audit = rideAuditor{events: repo}
 }
 
 // CreateFromLocation 收到 LINE 位置訊息後建立訂單並觸發派單
@@ -71,6 +78,8 @@ func (s *RideService) CreateFromLocation(ctx context.Context, req RideRequest) (
 	if err := s.rides.Create(ride); err != nil {
 		return nil, err
 	}
+	s.audit.record(ride.ID, nil, constants.RideStatusRequested,
+		events.TypeRideRequested, events.ActorCustomer, idPtr(customer.ID), "line")
 
 	// 非同步派單
 	go func(rideID int64) {
@@ -148,6 +157,8 @@ func (s *RideService) CreateByCustomer(
 	if err := s.rides.Create(ride); err != nil {
 		return nil, err
 	}
+	s.audit.record(ride.ID, nil, constants.RideStatusRequested,
+		events.TypeRideRequested, events.ActorCustomer, idPtr(customer.ID), "app")
 
 	// 非同步派單（與 CreateFromLocation 一致）
 	go func(rideID int64) {

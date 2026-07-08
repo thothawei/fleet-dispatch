@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"line-fleet-dispatch/internal/constants"
+	"line-fleet-dispatch/internal/events"
 	"line-fleet-dispatch/internal/model"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
@@ -64,5 +65,5 @@ func (a *AdminOperations) CancelRideByAdmin(ctx context.Context, rideID int64) (
 	if err != nil {
 		return "", ErrNotFound
 	}
-	return a.dispatch.cancelActiveRide(ctx, ride)
+	return a.dispatch.cancelActiveRide(ctx, ride, events.ActorAdmin, nil, "admin_force_cancel")
 }

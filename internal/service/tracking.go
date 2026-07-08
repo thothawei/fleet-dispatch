@@ -31,9 +31,10 @@ type TrackingService struct {
 	rides    *repository.RideRepository
 	tracks   *repository.TrackRepository
 	redis    *redisstore.Store
-	line      *lineclient.Client
-	dispatch  *DispatchService
+	line     *lineclient.Client
+	dispatch *DispatchService
 	publisher events.Publisher
+	audit    rideAuditor
 
 	etaMinInterval   time.Duration
 	etaDistThreshold float64
@@ -66,6 +67,11 @@ func NewTrackingService(
 		geofenced:        make(map[int64]bool),
 		etaPushed:        make(map[int64]etaPushState),
 	}
+}
+
+// SetRideEvents 注入訂單狀態審計寫入；可選。
+func (s *TrackingService) SetRideEvents(repo *repository.RideEventRepository) {
+	s.audit = rideAuditor{events: repo}
 }
 
 // publish nil-safe 事件發佈
@@ -157,6 +163,12 @@ func (s *TrackingService) checkGeofence(ctx context.Context, ride *model.Ride, l
 	}
 	log.Info().Int64("ride_id", ride.ID).Msg("司機進入上車圍籬")
 	_ = s.line.PushText(ctx, customerLineID, "司機已抵達上車點，請準備上車")
+	actor := (*int64)(nil)
+	if ride.DriverID != nil {
+		actor = ride.DriverID
+	}
+	s.audit.record(ride.ID, statusPtr(constants.RideStatusAccepted), constants.RideStatusAccepted,
+		events.TypeDriverArrived, events.ActorDriver, actor, "geofence")
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:   events.TypeDriverArrived,
 		RideID: ride.ID,
@@ -176,6 +188,8 @@ func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) (s
 	if err := s.rides.MarkPickedUp(rideID); err != nil {
 		return "", err
 	}
+	s.audit.record(rideID, statusPtr(constants.RideStatusAccepted), constants.RideStatusPickedUp,
+		events.TypeRidePickedUp, events.ActorDriver, idPtr(driverID), "")
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:   events.TypeRidePickedUp,
 		RideID: rideID,
@@ -200,6 +214,8 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 	if err := s.rides.CompleteRide(rideID, distanceM); err != nil {
 		return err
 	}
+	s.audit.record(rideID, statusPtr(constants.RideStatusPickedUp), constants.RideStatusCompleted,
+		events.TypeRideCompleted, events.ActorDriver, idPtr(driverID), "")
 	_ = s.drivers.UpdateStatus(driverID, constants.DriverStatusIdle)
 
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{

@@ -20,15 +20,16 @@ import (
 
 // DispatchService 派單：找最近司機 + 推播接單邀請 + 逾時重派
 type DispatchService struct {
-	drivers      *repository.DriverRepository
-	rides        *repository.RideRepository
-	customers    *repository.CustomerRepository
-	redis        *redisstore.Store
-	line         *lineclient.Client
-	eta          *ETAService
-	settings     *DispatchSettings
-	publisher    events.Publisher
-	appNotify    *notify.Dispatcher
+	drivers   *repository.DriverRepository
+	rides     *repository.RideRepository
+	customers *repository.CustomerRepository
+	redis     *redisstore.Store
+	line      *lineclient.Client
+	eta       *ETAService
+	settings  *DispatchSettings
+	publisher events.Publisher
+	appNotify *notify.Dispatcher
+	audit     rideAuditor
 }
 
 func NewDispatchService(
@@ -59,6 +60,11 @@ func NewDispatchService(
 // SetAppNotifier 注入 App 推播（FCM/APNs stub）；可選，測試可不接。
 func (s *DispatchService) SetAppNotifier(d *notify.Dispatcher) {
 	s.appNotify = d
+}
+
+// SetRideEvents 注入訂單狀態審計寫入；可選，測試可不接。
+func (s *DispatchService) SetRideEvents(repo *repository.RideEventRepository) {
+	s.audit = rideAuditor{events: repo}
 }
 
 // publish nil-safe 事件發佈（未接 Hub 時靜默略過）
@@ -120,6 +126,9 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 	if len(targets) > 0 {
 		if ride.Status == constants.RideStatusRequested {
 			_ = s.rides.UpdateStatus(rideID, constants.RideStatusAssigned)
+			s.audit.record(rideID, statusPtr(constants.RideStatusRequested), constants.RideStatusAssigned,
+				events.TypeRideAssigned, events.ActorSystem, nil, "dispatch_offer")
+			ride.Status = constants.RideStatusAssigned
 		}
 		for _, d := range targets {
 			offered[d.ID] = true
@@ -196,10 +205,13 @@ func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
 	if ride.Status != constants.RideStatusRequested && ride.Status != constants.RideStatusAssigned {
 		return // 已被接單或已取消
 	}
+	from := ride.Status
 	if err := s.rides.UpdateStatus(rideID, constants.RideStatusCancelled); err != nil {
 		log.Error().Err(err).Int64("ride_id", rideID).Msg("逾時取消訂單失敗")
 		return
 	}
+	s.audit.record(rideID, statusPtr(from), constants.RideStatusCancelled,
+		events.TypeRideCancelled, events.ActorSystem, nil, "dispatch_timeout")
 	s.redis.ClearRejected(ctx, rideID)
 	log.Warn().Int64("ride_id", rideID).Msg("逾時無人接單，訂單自動取消")
 	if customerLineID, err := s.rides.GetCustomerLineUserID(rideID); err == nil && customerLineID != "" {
@@ -224,7 +236,7 @@ func (s *DispatchService) CancelByCustomer(ctx context.Context, lineUserID strin
 	if ride == nil {
 		return "您目前沒有進行中的叫車", nil
 	}
-	return s.cancelActiveRide(ctx, ride)
+	return s.cancelActiveRide(ctx, ride, events.ActorCustomer, idPtr(customer.ID), "customer_cancel")
 }
 
 // CancelByCustomerID App 端入口：依 JWT 取得的 customer_id + 路徑帶的 ride_id 取消，
@@ -238,16 +250,23 @@ func (s *DispatchService) CancelByCustomerID(ctx context.Context, customerID, ri
 	if ride.CustomerID != customerID {
 		return "", ErrForbidden
 	}
-	return s.cancelActiveRide(ctx, ride)
+	return s.cancelActiveRide(ctx, ride, events.ActorCustomer, idPtr(customerID), "customer_cancel")
 }
 
 // cancelActiveRide 取消訂單的共用核心：條件式取消（避免與 accept/complete 競態）、
 // 釋放搶單鎖、司機回待命、通知客戶與司機。
-func (s *DispatchService) cancelActiveRide(ctx context.Context, ride *model.Ride) (string, error) {
+func (s *DispatchService) cancelActiveRide(
+	ctx context.Context,
+	ride *model.Ride,
+	actorRole string,
+	actorID *int64,
+	note string,
+) (string, error) {
 	if ride.Status == constants.RideStatusPickedUp {
 		return "行程已開始，無法取消", nil
 	}
 
+	from := ride.Status
 	ok, err := s.rides.CancelRide(ride.ID,
 		[]int16{constants.RideStatusRequested, constants.RideStatusAssigned, constants.RideStatusAccepted})
 	if err != nil {
@@ -256,8 +275,10 @@ func (s *DispatchService) cancelActiveRide(ctx context.Context, ride *model.Ride
 	if !ok {
 		return "訂單狀態已變更，無法取消", nil
 	}
+	s.audit.record(ride.ID, statusPtr(from), constants.RideStatusCancelled,
+		events.TypeRideCancelled, actorRole, actorID, note)
 	s.releaseAndReset(ctx, ride.ID, ride.DriverID)
-	log.Info().Int64("ride_id", ride.ID).Msg("客戶取消訂單")
+	log.Info().Int64("ride_id", ride.ID).Str("actor", actorRole).Msg("訂單已取消")
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:   events.TypeRideCancelled,
 		RideID: ride.ID,
@@ -266,7 +287,7 @@ func (s *DispatchService) cancelActiveRide(ctx context.Context, ride *model.Ride
 	// 若已派給司機，通知司機
 	if ride.DriverID != nil {
 		if d, e := s.drivers.FindByID(*ride.DriverID); e == nil {
-			_ = s.line.PushText(ctx, d.LineUserID, fmt.Sprintf("訂單 #%d 已被乘客取消", ride.ID))
+			_ = s.line.PushText(ctx, d.LineUserID, fmt.Sprintf("訂單 #%d 已被取消", ride.ID))
 		}
 	}
 	return "已為您取消叫車", nil
@@ -296,6 +317,8 @@ func (s *DispatchService) CancelByDriver(ctx context.Context, rideID, driverID i
 	if err := s.rides.ResetToRequested(rideID); err != nil {
 		return "", err
 	}
+	s.audit.record(rideID, statusPtr(constants.RideStatusAccepted), constants.RideStatusRequested,
+		events.TypeRideRedispatched, events.ActorDriver, idPtr(driverID), "driver_abandon")
 	log.Warn().Int64("ride_id", rideID).Int64("driver_id", driverID).Msg("司機放棄訂單，重新派單")
 	go func() { _ = s.Dispatch(context.Background(), rideID) }()
 
@@ -351,10 +374,13 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		etaSec, _ = s.eta.PickupETA(ctx, driverLat, driverLng, pickupLat, pickupLng)
 	}
 
+	from := ride.Status
 	if err := s.rides.AcceptRide(rideID, driverID, etaSec); err != nil {
 		s.redis.ReleaseRideLock(ctx, rideID)
 		return "", errors.New("接單失敗，請重試")
 	}
+	s.audit.record(rideID, statusPtr(from), constants.RideStatusAccepted,
+		events.TypeRideAccepted, events.ActorDriver, idPtr(driverID), "")
 	_ = s.drivers.UpdateStatus(driverID, constants.DriverStatusOnTrip)
 
 	navURL := util.GoogleMapsNavURL(pickupLat, pickupLng)
