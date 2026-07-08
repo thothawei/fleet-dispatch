@@ -1,0 +1,7 @@
+{
+  // Go 檔存檔時自動 gofmt（需 golang.go 擴充套件；CI 亦有 gofmt check 擋未格式化的提交）
+  "[go]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "golang.go"
+  }
+}

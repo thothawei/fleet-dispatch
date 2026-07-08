@@ -21,6 +21,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: gofmt check
+        # gofmt -l 列出未格式化的檔案；輸出非空即失敗並顯示檔名
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "以下檔案未跑 gofmt："
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Build server
         run: CGO_ENABLED=0 go build -o /dev/null ./cmd/server/
 
