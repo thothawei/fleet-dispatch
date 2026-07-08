@@ -99,9 +99,9 @@ func (s *RideService) rateLimitPerMin() int {
 
 // CustomerCreateRequest 乘客 App 下單輸入（含選填目的地）。
 type CustomerCreateRequest struct {
-	PickupLat, PickupLng float64
-	PickupAddress        string
-	DropoffAddress       string
+	PickupLat, PickupLng   float64
+	PickupAddress          string
+	DropoffAddress         string
 	DropoffLat, DropoffLng *float64
 }
 

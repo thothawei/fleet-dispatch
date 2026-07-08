@@ -27,14 +27,14 @@ type etaPushState struct {
 
 // TrackingService 位置回報、圍籬偵測、軌跡記錄、ETA 推播節流
 type TrackingService struct {
-	drivers  *repository.DriverRepository
-	rides    *repository.RideRepository
-	tracks   *repository.TrackRepository
-	redis    *redisstore.Store
-	line     *lineclient.Client
-	dispatch *DispatchService
+	drivers   *repository.DriverRepository
+	rides     *repository.RideRepository
+	tracks    *repository.TrackRepository
+	redis     *redisstore.Store
+	line      *lineclient.Client
+	dispatch  *DispatchService
 	publisher events.Publisher
-	audit    rideAuditor
+	audit     rideAuditor
 
 	etaMinInterval   time.Duration
 	etaDistThreshold float64

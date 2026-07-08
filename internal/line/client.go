@@ -26,8 +26,8 @@ func NewClient(accessToken string) *Client {
 }
 
 type replyRequest struct {
-	ReplyToken string          `json:"replyToken"`
-	Messages   []interface{}   `json:"messages"`
+	ReplyToken string        `json:"replyToken"`
+	Messages   []interface{} `json:"messages"`
 }
 
 type pushRequest struct {
@@ -41,15 +41,15 @@ type textMessage struct {
 }
 
 type templateMessage struct {
-	Type    string      `json:"type"`
-	AltText string      `json:"altText"`
+	Type     string      `json:"type"`
+	AltText  string      `json:"altText"`
 	Template interface{} `json:"template"`
 }
 
 type buttonsTemplate struct {
-	Type    string      `json:"type"`
-	Text    string      `json:"text"`
-	Actions []action    `json:"actions"`
+	Type    string   `json:"type"`
+	Text    string   `json:"text"`
+	Actions []action `json:"actions"`
 }
 
 type action struct {
