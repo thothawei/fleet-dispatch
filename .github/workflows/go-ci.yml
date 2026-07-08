@@ -1,0 +1,41 @@
+name: go-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: go-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build server
+        run: CGO_ENABLED=0 go build -o /dev/null ./cmd/server/
+
+      - name: Unit tests (no Docker)
+        # repository/redis/service 內含 testcontainers 整合測；CI 不啟 Docker，
+        # 只跑純單元包＋service 中明確不碰 DB 的測試名。
+        run: |
+          CGO_ENABLED=0 go test -count=1 -timeout 60s \
+            ./internal/auth/ \
+            ./internal/constants/ \
+            ./internal/events/ \
+            ./internal/handler/ \
+            ./internal/middleware/ \
+            ./internal/model/ \
+            ./internal/notify/ \
+            ./internal/util/
+          CGO_ENABLED=0 go test -count=1 -timeout 60s ./internal/service/ \
+            -run 'TestRideAuditor_|TestStatusPtrHelpers|TestEventTypeConstants_|TestDeviceTokenService_|TestValidatePickup|TestValidateOptional|TestRideAssignedPayload_|TestFormatETA|TestDispatcher_'
