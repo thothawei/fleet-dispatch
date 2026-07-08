@@ -82,16 +82,16 @@
 
 ## 安全洞（既有端點，需補認證，非新增）
 
-- [ ] `GET /api/rides/:id/track`：目前**無認證**（`main.go:167` 註解「暫不保護，未來加」）。應限本趟乘客/司機或 admin。
-- [ ] `GET /api/reports/daily`：**無認證**且與 `/api/admin/reports/daily` 重複。建議下架公開版，只留 admin 版。
+- [x] `GET /api/rides/:id/track`：✅ 已補認證（2026-07-08）。新增 `middleware.MultiAuth`（接受 driver/customer/admin 任一合法 token），授權在 `RideQueryService.AuthorizeTrackAccess`——admin 全放行、本趟乘客、被指派司機皆可，其餘 403、訂單不存在 404。後台前端不受影響（其軌跡走 `/admin/rides/:id` 內嵌的 `track_geojson`，非此端點）。
+- [x] `GET /api/reports/daily`：✅ 已下架公開版（2026-07-08）。移除路由與未用的 `reportHandler`，刪除 `internal/handler/report.go`（死碼）；只留 admin 版 `/api/admin/reports/daily`（reportRepo 仍供 admin handler 使用）。
 
 ---
 
 ## 資料層缺口（2026-07-08 實測確認，影響既有回傳）
 
-- [ ] **`GeoPoint.Scan` 是 no-op**（`internal/model/models.go:22`，註解「M1 僅寫入，讀取留待 M4」）：任何經 GORM 讀出的 `pickup_point`/`dropoff_point` 都是零值 → 乘客 `GET /api/customer/rides/:id` 回傳的 pickup_point 為 (0,0)。要補 EWKB/WKT 解析。
-- [ ] **司機端拿不到目的地**：`Ride.DropoffAddress/DropoffPoint` 存在於 model，但 handler/events 全域 grep 無任何 dropoff 輸出 → 司機 App「上車後導航去目的地」做不到。派單事件或 P1 #7（driver rides/active）回應需帶 dropoff。
-- [ ] `model.Ride` 無 JSON tag（回傳欄位名為 Go 大寫欄位）；`internal/handler/ride.go` import 排序未過 gofmt。
+- [x] **`GeoPoint.Scan` no-op** → ✅ 已補（2026-07-08）。實作 EWKB 解析（支援大小端、SRID 旗標、hex 字串/位元組/原始位元組三種 pgx 回傳型態，NULL 為 no-op）。單元測試 `internal/model/models_test.go` + 對真 PostGIS 的 round-trip 整合測試 `internal/service/geopoint_roundtrip_test.go`（pickup_point 由 (0,0) 修為正確 25.03/121.56）。
+- [x] `model.Ride` JSON tag → ✅ 已加 snake_case tag（含 `dropoff_point`/`dropoff_address` 暴露）；`GeoPoint` 加 `lat`/`lng` tag。gofmt import 排序修的是 `internal/service/ride.go`（原清單誤記為 handler，handler 實已過 gofmt）。
+- [ ] **司機端拿不到目的地（尚未完成）**：`Ride.DropoffPoint/DropoffAddress` 現已能經 JSON 正確暴露，但**派單事件/司機端點仍未帶 dropoff**，且下單流程從未寫入 dropoff（LINE 與 App 下單都只給 pickup）→ 司機 App「上車後導航去目的地」仍做不到。屬 P1（driver rides/active #7）與下單流程擴充範疇，待該批處理。
 
 ---
 
@@ -99,9 +99,9 @@
 
 ```
 ~~P0(#1→#2→#3→#4)~~ ✅ 已完成（2026-07-07），乘客 App 端到端已解鎖
-  → 安全洞(track/reports 補認證，順手) ← 下一步，2026-07-08 複查仍未補
+~~安全洞(track 補認證 / reports 下架)~~ + ~~資料層(GeoPoint.Scan / JSON tag)~~ ✅ 已完成（2026-07-08）
 
-  → P1(#5~#8 司機 App 可靠性)
+  → P1(#5~#8 司機 App 可靠性) ← 下一步（含補 dropoff 輸出）
   → P2(#9,#10 後台寫入) 與前端 C2/C3 對接
   → P3(#13,#14 推播) 配合 App A2/FCM
   → P4 Phase C 依商業需求

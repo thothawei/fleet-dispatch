@@ -7,8 +7,8 @@ import (
 
 	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/model"
-	"line-fleet-dispatch/internal/repository"
 	redisstore "line-fleet-dispatch/internal/redis"
+	"line-fleet-dispatch/internal/repository"
 )
 
 // RideRequest 客戶叫車輸入
@@ -156,6 +156,28 @@ func (s *RideQueryService) TrackGeoJSON(rideID int64) (string, error) {
 // GetActiveRideByCustomer 找乘客目前進行中的訂單（App 啟動/重連取 ride_id 用），無進行中訂單回 (nil, nil)
 func (s *RideQueryService) GetActiveRideByCustomer(customerID int64) (*model.Ride, error) {
 	return s.rides.FindActiveByCustomer(customerID)
+}
+
+// AuthorizeTrackAccess 授權軌跡端點的多角色存取：admin 全放行、本趟乘客、被指派司機皆可，
+// 其餘回 ErrForbidden；訂單不存在回 ErrNotFound。
+func (s *RideQueryService) AuthorizeTrackAccess(role string, subjectID, rideID int64) error {
+	ride, err := s.rides.GetByID(rideID)
+	if err != nil {
+		return ErrNotFound
+	}
+	switch role {
+	case "admin":
+		return nil
+	case "customer":
+		if ride.CustomerID == subjectID {
+			return nil
+		}
+	case "driver":
+		if ride.DriverID != nil && *ride.DriverID == subjectID {
+			return nil
+		}
+	}
+	return ErrForbidden
 }
 
 // GetRideForCustomer 乘客查詢單一訂單，附 owner 檢查：訂單不存在回 ErrNotFound，非本人訂單回 ErrForbidden

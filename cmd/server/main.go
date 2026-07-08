@@ -119,7 +119,6 @@ func main() {
 	lineHandler := handler.NewLineWebhookHandler(rideService, dispatchService, driverRepo, lineClient)
 	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, cfg.JWTSecret, cfg.JWTExpiryHours)
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
-	reportHandler := handler.NewReportHandler(reportRepo)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 
 	// 後台：管理員 repo/service/handler，並依環境變數種一個管理員（僅在尚無 admin 時）
@@ -173,9 +172,8 @@ func main() {
 			authed.POST("/rides/:id/cancel", rideHandler.Cancel)
 		}
 
-		// 唯讀（暫不保護，未來加 admin 認證）
-		api.GET("/rides/:id/track", rideHandler.Track)
-		api.GET("/reports/daily", reportHandler.Daily)
+		// 軌跡回放：受多角色 JWT 保護，僅本趟乘客／司機／admin 可存取（授權在 handler）
+		api.GET("/rides/:id/track", middleware.MultiAuth(cfg.JWTSecret), rideHandler.Track)
 
 		// 後台：登入公開，其餘受 admin JWT 保護
 		api.POST("/admin/login", adminHandler.Login)

@@ -94,9 +94,20 @@ func (h *RideHandler) Cancel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
 
-// Track GET /api/rides/:id/track — GeoJSON 軌跡回放
+// Track GET /api/rides/:id/track — GeoJSON 軌跡回放。
+// 受 MultiAuth 保護，僅限本趟乘客／被指派司機／admin 存取。
 func (h *RideHandler) Track(c *gin.Context) {
-	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	rideID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	role := middleware.RoleFromCtx(c)
+	subjectID := middleware.SubjectIDFromCtx(c)
+	if err := h.rides.AuthorizeTrackAccess(role, subjectID, rideID); err != nil {
+		c.JSON(readStatusForErr(err), gin.H{"error": err.Error()})
+		return
+	}
 	geojson, err := h.rides.TrackGeoJSON(rideID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

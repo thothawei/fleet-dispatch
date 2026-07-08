@@ -39,7 +39,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 > `line-fleet-app/docs/TODO.md`、`line-fleet-admin/docs/TODO.md`。
 
 1. **M7 乘客端 App = 0%**（最大缺口；後端依賴已解除，可直接動工）：`main_customer.dart` 仍是 placeholder。B1 登入 → B2 地圖叫車 → B3 WS 追蹤 → B4 狀態流。先寫 M7 slice 計畫（B6）。
-2. **後端安全洞**：`GET /api/rides/:id/track`、`GET /api/reports/daily` 無認證（main.go 公開群組）；後者與 admin 版重複，建議下架。
+2. ~~**後端安全洞**~~ + ~~**資料層缺口**~~：✅ 已完成（2026-07-08）。`/api/rides/:id/track` 補多角色 MultiAuth + owner 授權；公開 `/api/reports/daily` 下架（刪 report.go 死碼）。`GeoPoint.Scan` 補 EWKB 解析（修乘客訂單座標 (0,0)）、`Ride`/`GeoPoint` 加 JSON tag。全套件 + go vet 綠燈。詳見 [backend-api-gaps](backend-api-gaps.md)。**仍缺**：dropoff 未在派單事件/司機端點輸出、下單未寫入 dropoff（併入 P1）。
 3. **A1 司機背景定位**：現只有 geolocator 前景回報，「解 LIFF 死穴」賣點未兌現。
 4. **A2/D1 FCM 推播**：App 被殺收派單。需推播抽象層 + `device_tokens` 表（migration 未建）+ Firebase 專案 + 真裝置。
 5. **P1 司機 API**：`/api/driver/me`、顯式 online/offline、`/api/driver/rides/active`（App 重啟恢復行程）、HTTP 拒單 decline — 路由皆不存在。
