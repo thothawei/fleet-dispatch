@@ -55,7 +55,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 5. **D4 `ride_events` 審計表**：migrations 只到 000007，未建。
 6. **後台寫入**：D2 司機停用（須配派單池）+ C2 UI、D3 派單參數設定 + C3 UI、admin 強制取消 — admin 路由目前全 GET。
 7. **品質**：C4 admin 無測試；C5 各頁視覺截圖驗證未做；~~A4 M6 計畫勾選~~ ✅ 2026-07-08 已回填（`docs/superpowers/plans/2026-07-07-m6-driver-app.md`，證據以 commit/`flutter test` 為主；A1 真機長跑仍待）。本機 Go 整合測試需完整 Xcode（CGO stdlib.h）。
-8. **DevOps**：E2 三 repo 皆無 CI；E3 生產部署（現僅 dev docker-compose）；E4 監控（Prometheus/Grafana）。
+8. **DevOps**：~~E2 App CI~~ ✅ 2026-07-08（`line-fleet-app` `.github/workflows/flutter-ci.yml`：analyze + test）。後端／admin 尚無 CI；E3 生產部署（現僅 dev docker-compose）；E4 監控（Prometheus/Grafana）。
 9. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D6 RBAC 多角色；D7 Phase C 計費/評分/金流/metrics。
 
 ## 環境備忘
