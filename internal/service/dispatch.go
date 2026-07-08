@@ -179,7 +179,7 @@ func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
 	})
 }
 
-// CancelByCustomer 客戶主動取消進行中的訂單（尚未上車前）
+// CancelByCustomer 客戶主動取消進行中的訂單（尚未上車前）——LINE 入口，以 line_user_id 找目前進行中的訂單
 func (s *DispatchService) CancelByCustomer(ctx context.Context, lineUserID string) (string, error) {
 	customer, err := s.customers.FindByLineUserID(lineUserID)
 	if err != nil {
@@ -192,6 +192,26 @@ func (s *DispatchService) CancelByCustomer(ctx context.Context, lineUserID strin
 	if ride == nil {
 		return "您目前沒有進行中的叫車", nil
 	}
+	return s.cancelActiveRide(ctx, ride)
+}
+
+// CancelByCustomerID App 端入口：依 JWT 取得的 customer_id + 路徑帶的 ride_id 取消，
+// 須先驗證訂單擁有者（非本人回 ErrForbidden，訂單不存在回 ErrNotFound），
+// 找到訂單後沿用與 CancelByCustomer 相同的取消核心，不重寫派單/取消邏輯。
+func (s *DispatchService) CancelByCustomerID(ctx context.Context, customerID, rideID int64) (string, error) {
+	ride, err := s.rides.GetByID(rideID)
+	if err != nil {
+		return "", ErrNotFound
+	}
+	if ride.CustomerID != customerID {
+		return "", ErrForbidden
+	}
+	return s.cancelActiveRide(ctx, ride)
+}
+
+// cancelActiveRide 取消訂單的共用核心：條件式取消（避免與 accept/complete 競態）、
+// 釋放搶單鎖、司機回待命、通知客戶與司機。
+func (s *DispatchService) cancelActiveRide(ctx context.Context, ride *model.Ride) (string, error) {
 	if ride.Status == constants.RideStatusPickedUp {
 		return "行程已開始，無法取消", nil
 	}

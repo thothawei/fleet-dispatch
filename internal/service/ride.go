@@ -138,10 +138,11 @@ func (s *RideService) CreateByCustomer(
 // RideQueryService 訂單查詢
 type RideQueryService struct {
 	tracks *repository.TrackRepository
+	rides  *repository.RideRepository
 }
 
-func NewRideQueryService(tracks *repository.TrackRepository) *RideQueryService {
-	return &RideQueryService{tracks: tracks}
+func NewRideQueryService(tracks *repository.TrackRepository, rides *repository.RideRepository) *RideQueryService {
+	return &RideQueryService{tracks: tracks, rides: rides}
 }
 
 func (s *RideQueryService) TrackGeoJSON(rideID int64) (string, error) {
@@ -150,4 +151,21 @@ func (s *RideQueryService) TrackGeoJSON(rideID int64) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf(`{"type":"Feature","properties":{"ride_id":%d},"geometry":%s}`, rideID, geojson), nil
+}
+
+// GetActiveRideByCustomer 找乘客目前進行中的訂單（App 啟動/重連取 ride_id 用），無進行中訂單回 (nil, nil)
+func (s *RideQueryService) GetActiveRideByCustomer(customerID int64) (*model.Ride, error) {
+	return s.rides.FindActiveByCustomer(customerID)
+}
+
+// GetRideForCustomer 乘客查詢單一訂單，附 owner 檢查：訂單不存在回 ErrNotFound，非本人訂單回 ErrForbidden
+func (s *RideQueryService) GetRideForCustomer(customerID, rideID int64) (*model.Ride, error) {
+	ride, err := s.rides.GetByID(rideID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	if ride.CustomerID != customerID {
+		return nil, ErrForbidden
+	}
+	return ride, nil
 }
