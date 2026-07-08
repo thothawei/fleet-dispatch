@@ -69,7 +69,7 @@ func (c *Client) ReplyText(ctx context.Context, replyToken, text string) error {
 
 // PushText 主動推播文字
 func (c *Client) PushText(ctx context.Context, to, text string) error {
-	if c.accessToken == "" || to == "" {
+	if c == nil || c.accessToken == "" || to == "" {
 		return nil
 	}
 	return c.push(ctx, to, []interface{}{
@@ -79,7 +79,7 @@ func (c *Client) PushText(ctx context.Context, to, text string) error {
 
 // PushRideOffer 推播接單邀請（含接受按鈕）
 func (c *Client) PushRideOffer(ctx context.Context, to string, rideID int64, body string) error {
-	if c.accessToken == "" || to == "" {
+	if c == nil || c.accessToken == "" || to == "" {
 		return nil
 	}
 	msg := templateMessage{

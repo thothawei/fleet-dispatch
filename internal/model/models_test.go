@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"math"
 	"testing"
 )
@@ -87,5 +88,22 @@ func TestGeoPointScan_壞資料回錯誤(t *testing.T) {
 	var g GeoPoint
 	if err := g.Scan([]byte{0x01, 0x02}); err == nil {
 		t.Fatalf("過短的 EWKB 應回錯誤")
+	}
+}
+
+func TestPasswordHash不得出現在JSON(t *testing.T) {
+	cases := map[string]interface{}{
+		"Driver":   Driver{ID: 1, PasswordHash: "secret-hash"},
+		"Customer": Customer{ID: 1, PasswordHash: "secret-hash"},
+		"Admin":    Admin{ID: 1, PasswordHash: "secret-hash"},
+	}
+	for name, v := range cases {
+		b, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("%s 序列化失敗：%v", name, err)
+		}
+		if bytes.Contains(b, []byte("secret-hash")) || bytes.Contains(b, []byte("PasswordHash")) {
+			t.Fatalf("%s 的 JSON 洩漏 PasswordHash：%s", name, b)
+		}
 	}
 }

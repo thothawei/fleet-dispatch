@@ -35,6 +35,9 @@ type routeResponse struct {
 
 // RouteDuration 計算兩點路徑時間（秒）與距離（公尺）；失敗時用直線估算
 func (c *Client) RouteDuration(ctx context.Context, fromLat, fromLng, toLat, toLng float64) (durationSec int, distanceM int, err error) {
+	if c == nil {
+		return fallbackETA(fromLat, fromLng, toLat, toLng)
+	}
 	url := fmt.Sprintf("%s/route/v1/driving/%f,%f;%f,%f?overview=false",
 		c.baseURL, fromLng, fromLat, toLng, toLat)
 

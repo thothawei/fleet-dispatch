@@ -104,7 +104,7 @@ type Customer struct {
 	LineUserID   string    `gorm:"column:line_user_id;uniqueIndex;not null"`
 	Name         string    `gorm:"not null;default:''"`
 	Phone        string    `gorm:"not null;default:''"`
-	PasswordHash string    `gorm:"column:password_hash;not null;default:''"`
+	PasswordHash string    `gorm:"column:password_hash;not null;default:''" json:"-"`
 	CreatedAt    time.Time `gorm:"not null"`
 	UpdatedAt    time.Time `gorm:"not null"`
 }
@@ -119,7 +119,7 @@ type Driver struct {
 	Name         string    `gorm:"not null;default:''"`
 	Phone        string    `gorm:"not null;default:''"`
 	Status       int16     `gorm:"not null;default:0"`
-	PasswordHash string    `gorm:"column:password_hash;not null;default:''"`
+	PasswordHash string    `gorm:"column:password_hash;not null;default:''" json:"-"`
 	CreatedAt    time.Time `gorm:"not null"`
 	UpdatedAt    time.Time `gorm:"not null"`
 }
@@ -154,7 +154,7 @@ func (Ride) TableName() string {
 type Admin struct {
 	ID           int64     `gorm:"primaryKey"`
 	Username     string    `gorm:"column:username;uniqueIndex;not null"`
-	PasswordHash string    `gorm:"column:password_hash;not null;default:''"`
+	PasswordHash string    `gorm:"column:password_hash;not null;default:''" json:"-"`
 	Name         string    `gorm:"not null;default:''"`
 	CreatedAt    time.Time `gorm:"not null"`
 	UpdatedAt    time.Time `gorm:"not null"`
