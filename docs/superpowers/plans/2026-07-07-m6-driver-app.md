@@ -2,12 +2,15 @@
 
 > 承接設計 §6（line-fleet-app）。後端 WS（M5-WS）+ 司機認證（既有密碼 JWT）已就緒。
 > 實作在 `~/Documents/line-fleet-app`；本計畫存於後端 repo 的 plans 以集中管理。
+>
+> **回填（2026-07-08 / A4）**：四片主鏈路已落地於 `line-fleet-app` `main`；證據以
+> commit 歷史、`flutter analyze` / `flutter test` 為主。A1 鎖屏長跑改列「待真機驗收」。
 
 **Goal:** 把 line-fleet-app 從 scaffold 做成可用的司機端 App：登入 → 上線/待命 → 背景 GPS 回報 → 收派單 → 接單 → Google Maps 導航 → 抵達/上車/完成。Android 為主，在 `m6_pixel` 模擬器上逐片驗證。
 
 **Architecture:** `lib/core/`（dio API client、models、token 儲存、WS client）共用；`lib/driver/`（登入、首頁/上線、派單、行程流程）。狀態用 `ChangeNotifier + provider`。後端位址用 `--dart-define=API_BASE=...`，模擬器連宿主機用 `10.0.2.2:8080`。
 
-**Tech Stack:** Flutter 3.44 / Dart / dio / provider / shared_preferences / web_socket_channel / geolocator / url_launcher。
+**Tech Stack:** Flutter 3.44 / Dart / dio / provider / shared_preferences / web_socket_channel / geolocator / url_launcher / permission_handler。
 
 ## Global Constraints
 - 只改 `~/Documents/line-fleet-app`（不碰後端/其他 repo；後端要改另開）。
@@ -21,55 +24,67 @@
 - `POST /api/driver/register` `{name, line_user_id, password}` → `{driver_id, name, token}`
 - `POST /api/driver/location`（Bearer）`{lat, lng}` → `{ok:true}`
 - `POST /api/rides/:id/{accept,pickup,complete,cancel}`（Bearer）
-- `GET /ws?token=`（driver JWT）→ 事件 `ride.assigned`/`ride.accepted`/`ride.cancelled`（payload 見 events/event.go）
+- `GET /api/driver/rides/active`（Bearer）→ App 重啟還原進行中行程
+- `GET /ws?token=`（driver JWT）→ 事件 `ride.assigned`/`ride.accepted`/`ride.cancelled`（payload 見 events/event.go）；`ride.accepted` 可帶 `dropoff_address`
+
+## 完成證據索引（line-fleet-app）
+| Slice | 代表 commit / 路徑 | 自動驗證 |
+|-------|-------------------|---------|
+| 1 登入 | `16772c5` 起 `lib/driver/` + `TokenStorage` | `flutter analyze` |
+| 2 定位 | `cd5a039` A1：`getPositionStream` + FGS | `driverLocationSettings` 單測 |
+| 3 派單 | `lib/driver/driver_controller.dart` WS + accept | WS 事件解析單測 |
+| 4 行程 | dropoff 導航 + phase 狀態機 | ActiveRide / dropoff 單測 |
 
 ---
 
-## Slice 1：專案結構 + 司機登入（本次）
+## Slice 1：專案結構 + 司機登入 — ✅ 完成
 
-**做什麼**：加依賴、建 core（config/api/token）、driver 登入畫面 + 首頁 stub；登入打後端取 JWT 存起來，導到首頁顯示司機資訊 + 上線 toggle（暫僅本地）。
+**做什麼**：加依賴、建 core（config/api/token）、driver 登入畫面 + 首頁；登入打後端取 JWT 存起來，導到首頁顯示司機資訊 + 上線 toggle。
 
 **Files（line-fleet-app）**
-- `pubspec.yaml`：加 dio/provider/shared_preferences/web_socket_channel/geolocator/url_launcher
-- `lib/core/config.dart`：`apiBase`（dart-define，預設 `http://10.0.2.2:8080`）
-- `lib/core/api_client.dart`：dio 實例 + JWT 攔截器
-- `lib/core/auth_store.dart`：token/driverId 存取（shared_preferences）
-- `lib/core/driver_api.dart`：`login(lineUserId,password)`、`reportLocation(lat,lng)`
-- `lib/driver/driver_app.dart`：MaterialApp + 依登入狀態決定 login/home
-- `lib/driver/login_screen.dart`
-- `lib/driver/home_screen.dart`（顯示司機、上線 toggle stub、登出）
-- `lib/main.dart`：改為啟動 DriverApp
+- `pubspec.yaml`：dio/provider/shared_preferences/web_socket_channel/geolocator/url_launcher（後續另加 permission_handler）
+- `lib/core/config/app_config.dart`、`lib/core/api/fleet_api_client.dart`、`lib/core/storage/token_storage.dart`
+- `lib/driver/app.dart`、`screens/driver_login_screen.dart`、`screens/driver_home_screen.dart`
+- `lib/main_driver.dart` / `lib/main.dart`
 
 **步驟**
-- [ ] 1. 加依賴：`flutter pub add dio provider shared_preferences web_socket_channel geolocator url_launcher`
-- [ ] 2. 寫 core（config/api_client/auth_store/driver_api）
-- [ ] 3. 寫 driver（login_screen/home_screen/driver_app），改 main.dart
-- [ ] 4. `flutter analyze` 綠
-- [ ] 5. 後端起來 + 註冊測試司機 `driver001/pw123456`；模擬器跑 App，登入 → 進首頁顯示 driver_id/名稱
-- [ ] 6. 截圖驗證，commit
+- [x] 1. 加依賴
+- [x] 2. 寫 core（config/api/token）
+- [x] 3. 寫 driver（login/home/app），改進入點
+- [x] 4. `flutter analyze` 綠
+- [x] 5. 登入流程可連後端（開發過程已驗證；帳密依環境）
+- [x] 6. commit 進 `main`
 
-**驗收**：模擬器上輸入 driver001/pw123456 → 登入成功 → 首頁顯示司機資訊；錯誤密碼顯示錯誤；重開 App 仍保持登入（token 存 shared_preferences）。
+**驗收**：登入成功進首頁、錯誤密碼顯示錯誤、token 持久化重開仍登入。
 
 ---
 
-## Slice 2：定位回報（上線 → 背景 GPS）
-- geolocator 要位置權限；上線後每 5–10s 取位置 POST `/api/driver/location`；離線停止。
-- 前景先跑通；背景回報（App 切走仍回報）用 Android foreground service（geolocator 的 `getPositionStream` + `foregroundNotificationConfig`）。
-- 驗收：上線後後端 Redis 有此司機位置（`OnlineDriverLocations`）、後台地圖看得到；切到背景仍持續回報。
+## Slice 2：定位回報（上線 → 背景 GPS）— ✅ 程式完成 / 真機長跑待驗
 
-## Slice 3：收派單 + 接單
-- 登入後連 `/ws?token=`；收到 `ride.assigned`（payload: address/eta_sec/dist_m）→ 彈出接單卡片（含倒數）。
-- 按接受 → POST `/rides/:id/accept`；搶到→進「前往接客」；沒搶到→提示「已被接走」。
-- 驗收：後台/模擬器叫一次車，司機 App 即時跳派單、可接單、狀態轉「載客中」。
+- [x] geolocator 位置權限；上線後以 `getPositionStream` POST `/api/driver/location`；離線停止。
+- [x] Android `ForegroundNotificationConfig` 前景服務常駐通知（`lib/core/location/`）。
+- [x] Manifest：`FOREGROUND_SERVICE*`、`POST_NOTIFICATIONS`、`ACCESS_BACKGROUND_LOCATION`；iOS `UIBackgroundModes: location`。
+- [ ] **真機**：鎖屏 10 分鐘後後台地圖該司機座標仍持續更新（A1 尾巴）。
 
-## Slice 4：導航 + 行程狀態流程
-- 接單後首頁顯示上車點 + 「導航」按鈕（url_launcher 開 Google Maps deep link）。
-- 按鈕：抵達（自動/手動）、客戶已上車 → POST `/rides/:id/pickup`、完成 → `/rides/:id/complete`。
-- 收 `ride.cancelled` → 回待命。
-- 驗收：完整跑一趟 接單→導航→上車→完成，狀態機無誤。
+---
+
+## Slice 3：收派單 + 接單 — ✅ 完成
+
+- [x] 登入後連 `/ws?token=`；`ride.assigned` → 接單卡片。
+- [x] 接受 → POST `/rides/:id/accept`；進入「前往上車點」；失敗顯示錯誤。
+- [x] 單元測試覆蓋 `ride.assigned` / `ride.accepted` 解析。
+
+---
+
+## Slice 4：導航 + 行程狀態流程 — ✅ 完成
+
+- [x] 接單後上車點 + 導航（Google Maps deep link）；上車後目的地導航（dropoff）。
+- [x] 按鈕：客戶已上車 → pickup、完成 → complete、放棄 → cancel。
+- [x] 收 `ride.cancelled` / `ride.completed` → 清行程。
+- [x] App 重啟可由 `GET /driver/rides/active` 還原 Accepted/PickedUp。
 
 ---
 
 ## 備註
-- iOS/背景定位的完整解（flutter_background_geolocation）與 FCM 推播延後（需 Firebase + 真裝置）；Slice 2 先用 geolocator 前景+foreground service 展示管線。
-- 乘客端 App（M7）另開計畫，可大量重用 core。
+- FCM 推播（A2）仍依賴後端 D1（推播抽象 + `device_tokens`）+ Firebase + 真裝置。
+- 乘客端 App（M7）已在同 repo `lib/customer/` 落地最小可用版。

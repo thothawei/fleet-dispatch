@@ -19,14 +19,14 @@
 仍未動的重點缺口（優先序）：
 1. **B. 乘客端 App M7 = 0%**（`main_customer.dart` 仍是 placeholder）
 2. **後端安全洞**：`GET /api/rides/:id/track`、`GET /api/reports/daily` 仍無認證（main.go 公開群組）
-3. **A1 背景定位**（pubspec 只有 geolocator，無 background 方案）＋ **A2/D1 FCM 推播**（無 firebase 依賴、無 device_tokens migration）
+3. ~~**A1 背景定位**~~：✅ 2026-07-08 App 端已落地前景服務 GPS（`cd5a039`）；**待真機長跑驗收**。**A2/D1 FCM 推播**仍缺（無 firebase 依賴、無 device_tokens migration）
 4. **P1 司機 API**（me/online/offline/rides/active/decline 皆不存在於路由）
 5. **資料層缺口**（詳見 [backend-api-gaps.md](backend-api-gaps.md) 資料層節）：`GeoPoint.Scan` no-op → 讀回座標全零值；司機端拿不到 dropoff（「導航去目的地」被擋）；Ride 無 JSON tag
 6. **D4 ride_events 審計表**（migrations 只到 000007，未建）
 7. **C2/C3/D2/D3 後台寫入**（admin 路由全 GET）
 8. **C4 admin 無測試無 code-splitting、C5 視覺驗證未做**
 9. **E2 CI 三 repo 全無**（皆無 .github/workflows）、E3 生產部署、E4 監控
-10. **A4 文件回填**：M6 計畫勾選框仍全空（本次僅回填本文件與 STATUS，M6 計畫留給收尾時附實跑證據再勾）
+10. ~~**A4 文件回填**~~：✅ 2026-07-08 已回填 M6 計畫勾選與 STATUS（證據以 commit/`flutter test` 為主；A1 真機長跑仍待）
 
 各 repo 端的可執行清單：App → `line-fleet-app/docs/TODO.md`、後台 → `line-fleet-admin/docs/TODO.md`、後端端點 → [backend-api-gaps.md](backend-api-gaps.md)。
 
@@ -54,12 +54,13 @@
 
 主鏈路已完成，缺的是「App 被殺也收得到單」與品質。
 
-- [ ] **A1. 真背景定位**：現為 geolocator 前景回報。導入 `flutter_background_geolocation`（或 foreground service + 常駐通知），螢幕鎖定/切背景仍持續回報。這是整個專案賣點「解 LIFF 死穴」的真正兌現。
-  - 驗收：鎖屏 10 分鐘後，後台地圖上該司機座標仍持續更新。
+- [x] **A1. 真背景定位**：✅ 2026-07-08 完成程式落地（`getPositionStream` + Android `ForegroundNotificationConfig`；iOS background location plist）。
+  - 驗收（程式）：上線後常駐通知、切背景仍走 position stream 回報。
+  - [ ] 驗收（真機）：鎖屏 10 分鐘後，後台地圖上該司機座標仍持續更新。
 - [ ] **A2. FCM 推播收派單**（與後端 D1 綁）：App 被系統殺掉時，靠推播喚醒收派單。需 Firebase 專案 + 真裝置。
   - 驗收：App 完全關閉 → 叫車 → 手機跳推播 → 點開可接單。
-- [x] **A3. 司機端測試**：✅ 2026-07-07 完成（commit 7ef6370）。`test/widget_test.dart` 76 行，覆蓋行程狀態機（接單→上車→完成／放棄）與 WS 事件解析。
-- [ ] **A4. 回填 M6 計畫勾選框**、更新 STATUS.md 司機端段落。
+- [x] **A3. 司機端測試**：✅ 2026-07-07 完成（commit 7ef6370）。`test/widget_test.dart` 覆蓋行程狀態機與 WS 事件解析（後續持續擴充）。
+- [x] **A4. 回填 M6 計畫勾選框**、更新 STATUS.md 司機端段落：✅ 2026-07-08。
 - [ ] **A5. iOS build**（延後）：需完整 Xcode + CocoaPods；背景定位的 iOS 權限設定（`Info.plist` 的 location always）。
 
 ---
