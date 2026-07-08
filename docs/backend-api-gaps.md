@@ -87,6 +87,14 @@
 
 ---
 
+## 資料層缺口（2026-07-08 實測確認，影響既有回傳）
+
+- [ ] **`GeoPoint.Scan` 是 no-op**（`internal/model/models.go:22`，註解「M1 僅寫入，讀取留待 M4」）：任何經 GORM 讀出的 `pickup_point`/`dropoff_point` 都是零值 → 乘客 `GET /api/customer/rides/:id` 回傳的 pickup_point 為 (0,0)。要補 EWKB/WKT 解析。
+- [ ] **司機端拿不到目的地**：`Ride.DropoffAddress/DropoffPoint` 存在於 model，但 handler/events 全域 grep 無任何 dropoff 輸出 → 司機 App「上車後導航去目的地」做不到。派單事件或 P1 #7（driver rides/active）回應需帶 dropoff。
+- [ ] `model.Ride` 無 JSON tag（回傳欄位名為 Go 大寫欄位）；`internal/handler/ride.go` import 排序未過 gofmt。
+
+---
+
 ## 建議實作順序
 
 ```

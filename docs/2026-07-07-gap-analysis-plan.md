@@ -21,11 +21,12 @@
 2. **後端安全洞**：`GET /api/rides/:id/track`、`GET /api/reports/daily` 仍無認證（main.go 公開群組）
 3. **A1 背景定位**（pubspec 只有 geolocator，無 background 方案）＋ **A2/D1 FCM 推播**（無 firebase 依賴、無 device_tokens migration）
 4. **P1 司機 API**（me/online/offline/rides/active/decline 皆不存在於路由）
-5. **D4 ride_events 審計表**（migrations 只到 000007，未建）
-6. **C2/C3/D2/D3 後台寫入**（admin 路由全 GET）
-7. **C4 admin 無測試無 code-splitting、C5 視覺驗證未做**
-8. **E2 CI 三 repo 全無**（皆無 .github/workflows）、E3 生產部署、E4 監控
-9. **A4 文件回填**：M6 計畫勾選框仍全空（本次僅回填本文件與 STATUS，M6 計畫留給收尾時附實跑證據再勾）
+5. **資料層缺口**（詳見 [backend-api-gaps.md](backend-api-gaps.md) 資料層節）：`GeoPoint.Scan` no-op → 讀回座標全零值；司機端拿不到 dropoff（「導航去目的地」被擋）；Ride 無 JSON tag
+6. **D4 ride_events 審計表**（migrations 只到 000007，未建）
+7. **C2/C3/D2/D3 後台寫入**（admin 路由全 GET）
+8. **C4 admin 無測試無 code-splitting、C5 視覺驗證未做**
+9. **E2 CI 三 repo 全無**（皆無 .github/workflows）、E3 生產部署、E4 監控
+10. **A4 文件回填**：M6 計畫勾選框仍全空（本次僅回填本文件與 STATUS，M6 計畫留給收尾時附實跑證據再勾）
 
 各 repo 端的可執行清單：App → `line-fleet-app/docs/TODO.md`、後台 → `line-fleet-admin/docs/TODO.md`、後端端點 → [backend-api-gaps.md](backend-api-gaps.md)。
 
