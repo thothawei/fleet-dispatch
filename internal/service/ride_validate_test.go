@@ -29,3 +29,22 @@ func TestValidatePickupCoords(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateOptionalDropoffCoords(t *testing.T) {
+	lat, lng := 25.08, 121.57
+	t.Run("未提供座標", func(t *testing.T) {
+		if err := validateOptionalDropoffCoords(nil, nil); err != nil {
+			t.Fatalf("預期 nil，得到 %v", err)
+		}
+	})
+	t.Run("成對合法座標", func(t *testing.T) {
+		if err := validateOptionalDropoffCoords(&lat, &lng); err != nil {
+			t.Fatalf("預期 nil，得到 %v", err)
+		}
+	})
+	t.Run("只提供 lat", func(t *testing.T) {
+		if err := validateOptionalDropoffCoords(&lat, nil); !errors.Is(err, ErrInvalidCoords) {
+			t.Fatalf("預期 ErrInvalidCoords，得到 %v", err)
+		}
+	})
+}

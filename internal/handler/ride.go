@@ -64,11 +64,16 @@ func (h *RideHandler) Accept(c *gin.Context) {
 func (h *RideHandler) PickUp(c *gin.Context) {
 	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	driverID := middleware.DriverIDFromCtx(c)
-	if err := h.tracking.PickUp(c.Request.Context(), rideID, driverID); err != nil {
+	dropoff, err := h.tracking.PickUp(c.Request.Context(), rideID, driverID)
+	if err != nil {
 		c.JSON(statusForErr(err), gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	resp := gin.H{"ok": true}
+	if dropoff != "" {
+		resp["dropoff_address"] = dropoff
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // Complete POST /api/rides/:id/complete
@@ -136,16 +141,26 @@ func (h *RideHandler) Track(c *gin.Context) {
 func (h *RideHandler) Create(c *gin.Context) {
 	customerID := middleware.CustomerIDFromCtx(c)
 	var req struct {
-		PickupLat     float64 `json:"pickup_lat"`
-		PickupLng     float64 `json:"pickup_lng"`
-		PickupAddress string  `json:"pickup_address"`
+		PickupLat      float64  `json:"pickup_lat"`
+		PickupLng      float64  `json:"pickup_lng"`
+		PickupAddress  string   `json:"pickup_address"`
+		DropoffAddress string   `json:"dropoff_address"`
+		DropoffLat     *float64 `json:"dropoff_lat"`
+		DropoffLng     *float64 `json:"dropoff_lng"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
 		return
 	}
 	ride, err := h.rideService.CreateByCustomer(
-		c.Request.Context(), customerID, req.PickupLat, req.PickupLng, req.PickupAddress,
+		c.Request.Context(), customerID, service.CustomerCreateRequest{
+			PickupLat:      req.PickupLat,
+			PickupLng:      req.PickupLng,
+			PickupAddress:  req.PickupAddress,
+			DropoffAddress: req.DropoffAddress,
+			DropoffLat:     req.DropoffLat,
+			DropoffLng:     req.DropoffLng,
+		},
 	)
 	if err != nil {
 		c.JSON(createStatusForErr(err), gin.H{"error": err.Error()})

@@ -163,17 +163,18 @@ func (s *TrackingService) checkGeofence(ctx context.Context, ride *model.Ride, l
 	})
 }
 
-// PickUp 司機確認客戶上車
-func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) error {
+// PickUp 司機確認客戶上車；回傳目的地地址（未指定時為空字串）。
+func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) (string, error) {
 	ride, err := s.rides.GetByID(rideID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if ride.DriverID == nil || *ride.DriverID != driverID {
-		return ErrForbidden
+		return "", ErrForbidden
 	}
+	dropoff := ride.DropoffAddress
 	if err := s.rides.MarkPickedUp(rideID); err != nil {
-		return err
+		return "", err
 	}
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:   events.TypeRidePickedUp,
@@ -183,7 +184,7 @@ func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) er
 	if customerLineID != "" {
 		_ = s.line.PushText(ctx, customerLineID, "行程開始，祝您旅途愉快")
 	}
-	return nil
+	return dropoff, nil
 }
 
 // Complete 完成行程

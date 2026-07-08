@@ -75,14 +75,46 @@ func NewRideRepository(db *gorm.DB) *RideRepository {
 
 func (r *RideRepository) Create(ride *model.Ride) error {
 	// 用 RETURNING 直接取回自增 id，避免以 requested_at 反查造成的競態/誤取
+	if ride.DropoffPoint != nil {
+		return r.db.Raw(`
+			INSERT INTO rides (
+				customer_id, status, pickup_point, pickup_address,
+				dropoff_point, dropoff_address,
+				requested_at, created_at, updated_at
+			) VALUES (
+				?, ?,
+				ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+				?,
+				ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+				?,
+				?, ?, ?
+			)
+			RETURNING id
+		`,
+			ride.CustomerID,
+			ride.Status,
+			ride.PickupPoint.Lng,
+			ride.PickupPoint.Lat,
+			ride.PickupAddress,
+			ride.DropoffPoint.Lng,
+			ride.DropoffPoint.Lat,
+			ride.DropoffAddress,
+			ride.RequestedAt,
+			ride.CreatedAt,
+			ride.UpdatedAt,
+		).Scan(&ride.ID).Error
+	}
 	return r.db.Raw(`
 		INSERT INTO rides (
 			customer_id, status, pickup_point, pickup_address,
+			dropoff_address,
 			requested_at, created_at, updated_at
 		) VALUES (
 			?, ?,
 			ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
-			?, ?, ?, ?
+			?,
+			?,
+			?, ?, ?
 		)
 		RETURNING id
 	`,
@@ -91,6 +123,7 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 		ride.PickupPoint.Lng,
 		ride.PickupPoint.Lat,
 		ride.PickupAddress,
+		ride.DropoffAddress,
 		ride.RequestedAt,
 		ride.CreatedAt,
 		ride.UpdatedAt,

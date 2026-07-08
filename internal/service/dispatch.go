@@ -345,9 +345,14 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		RideID:  rideID,
 		Payload: map[string]any{"driver_name": driver.Name, "eta_sec": etaSec},
 	})
+	driverPayload := map[string]any{}
+	if ride.DropoffAddress != "" {
+		driverPayload["dropoff_address"] = ride.DropoffAddress
+	}
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
-		Type:   events.TypeRideAccepted,
-		RideID: rideID,
+		Type:    events.TypeRideAccepted,
+		RideID:  rideID,
+		Payload: driverPayload,
 	})
 
 	return "接單成功", nil

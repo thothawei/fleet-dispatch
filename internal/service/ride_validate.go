@@ -10,3 +10,16 @@ func validatePickupCoords(lat, lng float64) error {
 	}
 	return nil
 }
+
+// validateOptionalDropoffCoords 目的地座標為選填；若提供則 lat/lng 須成對且合法。
+func validateOptionalDropoffCoords(lat, lng *float64) error {
+	hasLat := lat != nil
+	hasLng := lng != nil
+	if hasLat != hasLng {
+		return ErrInvalidCoords
+	}
+	if !hasLat {
+		return nil
+	}
+	return validatePickupCoords(*lat, *lng)
+}

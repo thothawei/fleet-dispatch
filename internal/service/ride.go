@@ -80,15 +80,25 @@ func (s *RideService) CreateFromLocation(ctx context.Context, req RideRequest) (
 	return ride, nil
 }
 
+// CustomerCreateRequest 乘客 App 下單輸入（含選填目的地）。
+type CustomerCreateRequest struct {
+	PickupLat, PickupLng float64
+	PickupAddress        string
+	DropoffAddress       string
+	DropoffLat, DropoffLng *float64
+}
+
 // CreateByCustomer 供已登入乘客（App）直接叫車：身分取自 JWT 的 customer_id。
 // 下單前擋「同一乘客已有進行中訂單」，建立後沿用非同步派單。
 func (s *RideService) CreateByCustomer(
 	ctx context.Context,
 	customerID int64,
-	pickupLat, pickupLng float64,
-	pickupAddress string,
+	req CustomerCreateRequest,
 ) (*model.Ride, error) {
-	if err := validatePickupCoords(pickupLat, pickupLng); err != nil {
+	if err := validatePickupCoords(req.PickupLat, req.PickupLng); err != nil {
+		return nil, err
+	}
+	if err := validateOptionalDropoffCoords(req.DropoffLat, req.DropoffLng); err != nil {
 		return nil, err
 	}
 
@@ -115,13 +125,17 @@ func (s *RideService) CreateByCustomer(
 
 	now := time.Now()
 	ride := &model.Ride{
-		CustomerID:    customer.ID,
-		Status:        constants.RideStatusRequested,
-		PickupPoint:   model.GeoPoint{Lat: pickupLat, Lng: pickupLng},
-		PickupAddress: pickupAddress,
-		RequestedAt:   now,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		CustomerID:     customer.ID,
+		Status:         constants.RideStatusRequested,
+		PickupPoint:    model.GeoPoint{Lat: req.PickupLat, Lng: req.PickupLng},
+		PickupAddress:  req.PickupAddress,
+		DropoffAddress: req.DropoffAddress,
+		RequestedAt:    now,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	if req.DropoffLat != nil && req.DropoffLng != nil {
+		ride.DropoffPoint = &model.GeoPoint{Lat: *req.DropoffLat, Lng: *req.DropoffLng}
 	}
 	if err := s.rides.Create(ride); err != nil {
 		return nil, err
