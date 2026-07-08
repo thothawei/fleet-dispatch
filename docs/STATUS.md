@@ -51,7 +51,8 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 
 1. **M7 乘客端收尾**（主鏈路已通）：~~B6 計畫~~ ✅ 2026-07-08（[2026-07-08-m7-customer-app.md](superpowers/plans/2026-07-08-m7-customer-app.md)）。仍待：Maps API key、地圖追蹤（Slice 5）、B5 評分/付款（Phase C）、端到端驗收截圖。
 2. ~~**A1 司機背景定位**~~：✅ 已實作（2026-07-08，line-fleet-app）。`getPositionStream` + Android 前景服務通知；**待真機驗收**鎖屏 10 分鐘後座標仍更新。
-3. **A2/D1 FCM 推播**：App 被殺收派單。需推播抽象層 + `device_tokens` 表（migration 未建）+ Firebase 專案 + 真裝置。
+3. ~~**A2/D1 FCM 推播（後端）**~~：✅ 2026-07-08 D1 契約落地——`device_tokens` migration、`Notifier` stub（LogPusher）、
+   `POST/DELETE /api/{driver,customer}/device-token`、派單時並發 App 推播。**真 FCM/APNs 與 App A2 註冊 token 仍待** Firebase／真裝置。
 4. ~~**P1 小尾巴**~~：✅ 已完成（2026-07-08）。`ride.assigned` 事件已帶 `dropoff_address/lat/lng`；司機接單前可預覽目的地。LINE 叫車仍無目的地（設計取捨）。
 5. **D4 `ride_events` 審計表**：migrations 只到 000007，未建。
 6. ~~**後台寫入（後端 P2）**~~：✅ 2026-07-08 API 已完成。**待前端** C2 司機啟停 UI、C3 派單參數頁、訂單強制取消按鈕。

@@ -74,8 +74,8 @@
 
 | # | Method | Path | 認證 | 說明 |
 |---|---|---|---|---|
-| 13 | POST·DELETE | `/api/driver/device-token` | driver JWT | 註冊/註銷 FCM/APNs 裝置 token（存 `device_tokens` 表） |
-| 14 | POST·DELETE | `/api/customer/device-token` | customer JWT | 同上，乘客端 |
+| 13 | POST·DELETE | `/api/driver/device-token` | driver JWT | ✅ 2026-07-08（`DeviceTokenHandler`，存 `device_tokens`；推播走 `notify.LogPusher` stub，可換真 FCM） |
+| 14 | POST·DELETE | `/api/customer/device-token` | customer JWT | ✅ 同上 |
 
 > 端點只是入口；核心是後端推播抽象層（LINE / FCM / APNs 可切換）+ `device_tokens` 表（見 gap-plan D1）。
 

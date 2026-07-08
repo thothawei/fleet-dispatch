@@ -93,8 +93,10 @@
 
 ## D. 後端（line-fleet-dispatch）— Phase B 尾 + Phase C + App 支撐
 
-- [ ] **D1. 推播抽象層 + `device_tokens` 表**（撐 A2）：把推播抽成介面（LINE / FCM / APNs 可切換），存裝置 token。
-  - 驗收：依使用者裝置走 FCM/APNs 送出派單推播。
+- [x] **D1. 推播抽象層 + `device_tokens` 表**（撐 A2）：✅ 2026-07-08。migration `000008`、`internal/notify`（AppPusher + LogPusher stub）、
+  `DeviceTokenService` + `POST/DELETE /api/{driver,customer}/device-token`；派單 `pushOffer` 並發 App 推播。
+  - 驗收（契約）：註冊 token 後派單會走 AppPusher（目前 stub 打 log）。
+  - [ ] 驗收（生產）：替換為真 FCM/APNs 實作 + App A2 註冊／點推播可接單。
 - [ ] **D2. 後台寫入 API — 司機停用/啟用**：需與派單邏輯配合（停用者不進派單池），否則是假功能。
   - 驗收：後台停用司機 → 該司機不再被派單、也不能上線。
 - [ ] **D3. 後台寫入 API — 派單參數設定**：逾時秒數、搜尋半徑、節流門檻等改為可線上調整（現多為 env/常數）。

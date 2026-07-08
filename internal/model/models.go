@@ -163,3 +163,18 @@ type Admin struct {
 func (Admin) TableName() string {
 	return "admins"
 }
+
+// DeviceToken 存 FCM/APNs 裝置推播 token（App 被殺仍可收派單）。
+type DeviceToken struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	Role      string    `gorm:"not null" json:"role"`
+	SubjectID int64     `gorm:"column:subject_id;not null" json:"subject_id"`
+	Platform  string    `gorm:"not null" json:"platform"`
+	Token     string    `gorm:"not null" json:"token"`
+	CreatedAt time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt time.Time `gorm:"not null" json:"updated_at"`
+}
+
+func (DeviceToken) TableName() string {
+	return "device_tokens"
+}

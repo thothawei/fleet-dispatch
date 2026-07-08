@@ -12,6 +12,7 @@ import (
 	"line-fleet-dispatch/internal/events"
 	lineclient "line-fleet-dispatch/internal/line"
 	"line-fleet-dispatch/internal/model"
+	"line-fleet-dispatch/internal/notify"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
 	"line-fleet-dispatch/internal/util"
@@ -27,6 +28,7 @@ type DispatchService struct {
 	eta          *ETAService
 	settings     *DispatchSettings
 	publisher    events.Publisher
+	appNotify    *notify.Dispatcher
 }
 
 func NewDispatchService(
@@ -52,6 +54,11 @@ func NewDispatchService(
 		settings:  settings,
 		publisher: publisher,
 	}
+}
+
+// SetAppNotifier 注入 App 推播（FCM/APNs stub）；可選，測試可不接。
+func (s *DispatchService) SetAppNotifier(d *notify.Dispatcher) {
+	s.appNotify = d
 }
 
 // publish nil-safe 事件發佈（未接 Hub 時靜默略過）
@@ -163,6 +170,14 @@ func (s *DispatchService) pushOffer(ctx context.Context, driver *model.Driver, r
 	}
 	if err := s.line.PushRideOffer(ctx, driver.LineUserID, ride.ID, msg); err != nil {
 		log.Error().Err(err).Int64("driver_id", driver.ID).Msg("推播派單失敗")
+	}
+	// App 推播（FCM/APNs）：與 LINE 並存；無 token／stub 時靜默略過
+	if s.appNotify != nil {
+		s.appNotify.NotifyDriverRideOffer(
+			ctx, driver.ID, ride.ID,
+			fmt.Sprintf("新派單 #%d", ride.ID),
+			msg,
+		)
 	}
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driver.ID}, events.Event{
 		Type:    events.TypeRideAssigned,

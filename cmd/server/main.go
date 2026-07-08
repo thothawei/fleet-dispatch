@@ -19,6 +19,7 @@ import (
 	"line-fleet-dispatch/internal/handler"
 	lineclient "line-fleet-dispatch/internal/line"
 	"line-fleet-dispatch/internal/middleware"
+	"line-fleet-dispatch/internal/notify"
 	osrmclient "line-fleet-dispatch/internal/osrm"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
@@ -59,6 +60,7 @@ func main() {
 	rideRepo := repository.NewRideRepository(db)
 	trackRepo := repository.NewTrackRepository(db)
 	reportRepo := repository.NewReportRepository(db)
+	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 
 	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
 	if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
@@ -102,6 +104,9 @@ func main() {
 		dispatchSettings,
 		hub,
 	)
+	appNotify := notify.NewDispatcher(deviceTokenRepo, notify.LogPusher{})
+	dispatchService.SetAppNotifier(appNotify)
+	deviceTokenService := service.NewDeviceTokenService(deviceTokenRepo)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
 	trackingService := service.NewTrackingService(
 		driverRepo, rideRepo, trackRepo, redisStore, lineClient, dispatchService,
@@ -123,6 +128,7 @@ func main() {
 	lineHandler := handler.NewLineWebhookHandler(rideService, dispatchService, driverRepo, lineClient)
 	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, rideQueryService, cfg.JWTSecret, cfg.JWTExpiryHours)
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
+	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenService)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 
 	// 後台：管理員 repo/service/handler，並依環境變數種一個管理員（僅在尚無 admin 時）
@@ -166,6 +172,8 @@ func main() {
 			customerAuthed.GET("/customer/rides/active", rideHandler.ActiveByCustomer)
 			customerAuthed.GET("/customer/rides/:id", rideHandler.GetByCustomer)
 			customerAuthed.POST("/rides/:id/cancel-by-customer", rideHandler.CancelByCustomer)
+			customerAuthed.POST("/customer/device-token", deviceTokenHandler.RegisterByCustomer)
+			customerAuthed.DELETE("/customer/device-token", deviceTokenHandler.UnregisterByCustomer)
 		}
 
 		// 受 JWT 保護：司機操作（driver_id 取自 token，不信任 body）
@@ -177,6 +185,8 @@ func main() {
 			authed.POST("/driver/offline", driverHandler.Offline)
 			authed.GET("/driver/rides/active", driverHandler.ActiveRide)
 			authed.POST("/driver/location", driverHandler.ReportLocation)
+			authed.POST("/driver/device-token", deviceTokenHandler.RegisterByDriver)
+			authed.DELETE("/driver/device-token", deviceTokenHandler.UnregisterByDriver)
 			authed.POST("/rides/:id/accept", rideHandler.Accept)
 			authed.POST("/rides/:id/pickup", rideHandler.PickUp)
 			authed.POST("/rides/:id/complete", rideHandler.Complete)
