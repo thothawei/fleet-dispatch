@@ -34,14 +34,19 @@
 
 ---
 
-## P1 — 司機 App 完整度與可靠性
+## P1 — 司機 App 完整度與可靠性 ✅ 全數完成（2026-07-08）
 
 | # | Method | Path | 認證 | 說明 |
 |---|---|---|---|---|
-| 5 | GET | `/api/driver/me` | driver JWT | 司機個資/目前狀態（App 首頁顯示，取代信任本地） |
-| 6 | POST | `/api/driver/online`·`/api/driver/offline` | driver JWT | 顯式上線/下線（目前上線是「有回報位置」的隱式狀態，下線無明確端點→無法乾淨移出派單池） |
-| 7 | GET | `/api/driver/rides/active` | driver JWT | 司機當前進行中訂單（App 中途重啟要能恢復「載客中」狀態，否則行程遺失） |
-| 8 | POST | `/api/rides/:id/decline` | driver JWT | 司機明確拒單（現拒單走 LINE Flex 按鈕；App 需 HTTP 版） 複用 `DispatchService.DeclineOffer` |
+| 5 | GET | `/api/driver/me` | driver JWT | ✅ `DriverHandler.Me`→`DriverRegistry.Me`。回 driver_id/name/phone/status（不含密碼雜湊） |
+| 6 | POST | `/api/driver/online`·`/api/driver/offline` | driver JWT | ✅ `DriverRegistry.GoOnline/GoOffline`。online→Idle（載客中不降級）、offline→Offline（乾淨移出派單池，dispatch 以 status 過濾）；**載客中下線回 409**（`ErrDriverOnTrip`） |
+| 7 | GET | `/api/driver/rides/active` | driver JWT | ✅ `DriverHandler.ActiveRide`→`RideQueryService.GetActiveRideByDriver`（複用 `FindActiveByDriver`，回 Accepted/PickedUp）。無則 `{"ride":null}`。訂單 JSON 現含 dropoff 欄位（資料層修復後） |
+| 8 | POST | `/api/rides/:id/decline` | driver JWT | ✅ `RideHandler.Decline`→`DispatchService.DeclineOffer`（複用既有）。記錄拒接，重派跳過此司機，司機仍待命 |
+
+> 驗證：service 整合測試（上下線狀態轉移＋載客中守門、GetActiveRideByDriver）＋對真 server 實跑
+> 全部端點（me/online/offline/rides·active/decline 皆回正確狀態；track owner 200／他人 403）。
+> **仍缺（P1 尾巴）**：#7 已能回 dropoff，但**派單事件仍未帶 dropoff，且下單流程從未寫入 dropoff**
+> → 司機「上車後導航去目的地」仍缺資料源。需擴充下單（LINE/App 收目的地）與派單事件 payload。
 
 ---
 
@@ -100,8 +105,10 @@
 ```
 ~~P0(#1→#2→#3→#4)~~ ✅ 已完成（2026-07-07），乘客 App 端到端已解鎖
 ~~安全洞(track 補認證 / reports 下架)~~ + ~~資料層(GeoPoint.Scan / JSON tag)~~ ✅ 已完成（2026-07-08）
+~~P1(#5~#8 司機 App 可靠性)~~ ✅ 已完成（2026-07-08）
 
-  → P1(#5~#8 司機 App 可靠性) ← 下一步（含補 dropoff 輸出）
+  → P1 尾巴：下單/派單事件補 dropoff（司機導航目的地資料源）
+  → P2(#9,#10 後台寫入) 與前端 C2/C3 對接
   → P2(#9,#10 後台寫入) 與前端 C2/C3 對接
   → P3(#13,#14 推播) 配合 App A2/FCM
   → P4 Phase C 依商業需求

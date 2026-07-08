@@ -94,6 +94,22 @@ func (h *RideHandler) Cancel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
 
+// Decline POST /api/rides/:id/decline — 司機明確拒接派單邀請（App 版，取代 LINE Flex 按鈕）。
+// 記錄拒接後重派會跳過此司機；司機仍為待命狀態，訂單留在可派狀態。
+func (h *RideHandler) Decline(c *gin.Context) {
+	rideID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	driverID := middleware.DriverIDFromCtx(c)
+	if err := h.dispatch.DeclineOffer(c.Request.Context(), rideID, driverID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // Track GET /api/rides/:id/track — GeoJSON 軌跡回放。
 // 受 MultiAuth 保護，僅限本趟乘客／被指派司機／admin 存取。
 func (h *RideHandler) Track(c *gin.Context) {

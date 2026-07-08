@@ -42,7 +42,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 2. ~~**後端安全洞**~~ + ~~**資料層缺口**~~：✅ 已完成（2026-07-08）。`/api/rides/:id/track` 補多角色 MultiAuth + owner 授權；公開 `/api/reports/daily` 下架（刪 report.go 死碼）。`GeoPoint.Scan` 補 EWKB 解析（修乘客訂單座標 (0,0)）、`Ride`/`GeoPoint` 加 JSON tag。全套件 + go vet 綠燈。詳見 [backend-api-gaps](backend-api-gaps.md)。**仍缺**：dropoff 未在派單事件/司機端點輸出、下單未寫入 dropoff（併入 P1）。
 3. **A1 司機背景定位**：現只有 geolocator 前景回報，「解 LIFF 死穴」賣點未兌現。
 4. **A2/D1 FCM 推播**：App 被殺收派單。需推播抽象層 + `device_tokens` 表（migration 未建）+ Firebase 專案 + 真裝置。
-5. **P1 司機 API**：`/api/driver/me`、顯式 online/offline、`/api/driver/rides/active`（App 重啟恢復行程）、HTTP 拒單 decline — 路由皆不存在。
+5. ~~**P1 司機 API**~~：✅ 已完成（2026-07-08）。`/api/driver/me`、顯式 online/offline（載客中下線回 409）、`/api/driver/rides/active`（App 重啟恢復行程）、HTTP 拒單 decline 全數上線並對真 server 實跑驗證。**尾巴**：下單/派單事件仍未帶 dropoff，司機導航目的地缺資料源（見 backend-api-gaps P1 註）。
 6. **D4 `ride_events` 審計表**：migrations 只到 000007，未建。
 7. **後台寫入**：D2 司機停用（須配派單池）+ C2 UI、D3 派單參數設定 + C3 UI、admin 強制取消 — admin 路由目前全 GET。
 8. **品質**：C4 admin 無測試、無 code-splitting（單包 >500KB）；C5 各頁視覺截圖驗證未做；A4 M6 計畫勾選框未回填（留待附實跑證據再勾）。

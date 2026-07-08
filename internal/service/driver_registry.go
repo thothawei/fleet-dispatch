@@ -5,6 +5,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/model"
 	"line-fleet-dispatch/internal/repository"
 )
@@ -48,4 +49,43 @@ func (s *DriverRegistry) Login(ctx context.Context, lineUserID, password string)
 		return nil, ErrInvalidCredentials
 	}
 	return driver, nil
+}
+
+// Me 取司機個資與目前狀態（App 首頁顯示，取代信任本地狀態）
+func (s *DriverRegistry) Me(driverID int64) (*model.Driver, error) {
+	return s.drivers.FindByID(driverID)
+}
+
+// GoOnline 顯式上線：設為待命（Idle），重新進入派單池。
+// 載客中（OnTrip）則維持原狀不降級，直接回傳目前狀態。
+func (s *DriverRegistry) GoOnline(driverID int64) (*model.Driver, error) {
+	d, err := s.drivers.FindByID(driverID)
+	if err != nil {
+		return nil, err
+	}
+	if d.Status == constants.DriverStatusOnTrip {
+		return d, nil
+	}
+	if err := s.drivers.UpdateStatus(driverID, constants.DriverStatusIdle); err != nil {
+		return nil, err
+	}
+	d.Status = constants.DriverStatusIdle
+	return d, nil
+}
+
+// GoOffline 顯式下線：設為離線（Offline），乾淨移出派單池（dispatch 以 status 過濾）。
+// 載客中不得下線，回 ErrDriverOnTrip，避免遺失進行中行程。
+func (s *DriverRegistry) GoOffline(driverID int64) (*model.Driver, error) {
+	d, err := s.drivers.FindByID(driverID)
+	if err != nil {
+		return nil, err
+	}
+	if d.Status == constants.DriverStatusOnTrip {
+		return nil, ErrDriverOnTrip
+	}
+	if err := s.drivers.UpdateStatus(driverID, constants.DriverStatusOffline); err != nil {
+		return nil, err
+	}
+	d.Status = constants.DriverStatusOffline
+	return d, nil
 }

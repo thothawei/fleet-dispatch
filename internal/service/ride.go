@@ -158,6 +158,11 @@ func (s *RideQueryService) GetActiveRideByCustomer(customerID int64) (*model.Rid
 	return s.rides.FindActiveByCustomer(customerID)
 }
 
+// GetActiveRideByDriver 找司機目前進行中的訂單（已接/載客中），供 App 中途重啟恢復行程；無則回 (nil, nil)
+func (s *RideQueryService) GetActiveRideByDriver(driverID int64) (*model.Ride, error) {
+	return s.rides.FindActiveByDriver(driverID)
+}
+
 // AuthorizeTrackAccess 授權軌跡端點的多角色存取：admin 全放行、本趟乘客、被指派司機皆可，
 // 其餘回 ErrForbidden；訂單不存在回 ErrNotFound。
 func (s *RideQueryService) AuthorizeTrackAccess(role string, subjectID, rideID int64) error {

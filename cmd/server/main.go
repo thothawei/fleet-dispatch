@@ -117,7 +117,7 @@ func main() {
 	// Handlers
 	healthHandler := handler.NewHealthHandler(db, redisClient)
 	lineHandler := handler.NewLineWebhookHandler(rideService, dispatchService, driverRepo, lineClient)
-	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, cfg.JWTSecret, cfg.JWTExpiryHours)
+	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, rideQueryService, cfg.JWTSecret, cfg.JWTExpiryHours)
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 
@@ -165,11 +165,16 @@ func main() {
 		authed := api.Group("")
 		authed.Use(middleware.DriverAuth(cfg.JWTSecret))
 		{
+			authed.GET("/driver/me", driverHandler.Me)
+			authed.POST("/driver/online", driverHandler.Online)
+			authed.POST("/driver/offline", driverHandler.Offline)
+			authed.GET("/driver/rides/active", driverHandler.ActiveRide)
 			authed.POST("/driver/location", driverHandler.ReportLocation)
 			authed.POST("/rides/:id/accept", rideHandler.Accept)
 			authed.POST("/rides/:id/pickup", rideHandler.PickUp)
 			authed.POST("/rides/:id/complete", rideHandler.Complete)
 			authed.POST("/rides/:id/cancel", rideHandler.Cancel)
+			authed.POST("/rides/:id/decline", rideHandler.Decline)
 		}
 
 		// 軌跡回放：受多角色 JWT 保護，僅本趟乘客／司機／admin 可存取（授權在 handler）

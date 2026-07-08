@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 
 	"line-fleet-dispatch/internal/auth"
 	"line-fleet-dispatch/internal/middleware"
+	"line-fleet-dispatch/internal/model"
 	"line-fleet-dispatch/internal/service"
 )
 
@@ -15,6 +17,7 @@ import (
 type DriverHandler struct {
 	tracking       *service.TrackingService
 	drivers        *service.DriverRegistry
+	rides          *service.RideQueryService
 	jwtSecret      string
 	jwtExpiryHours int
 }
@@ -22,15 +25,76 @@ type DriverHandler struct {
 func NewDriverHandler(
 	tracking *service.TrackingService,
 	drivers *service.DriverRegistry,
+	rides *service.RideQueryService,
 	jwtSecret string,
 	jwtExpiryHours int,
 ) *DriverHandler {
 	return &DriverHandler{
 		tracking:       tracking,
 		drivers:        drivers,
+		rides:          rides,
 		jwtSecret:      jwtSecret,
 		jwtExpiryHours: jwtExpiryHours,
 	}
+}
+
+// driverPublic 回傳司機可公開的個資（不含密碼雜湊）
+func driverPublic(d *model.Driver) gin.H {
+	return gin.H{
+		"driver_id": d.ID,
+		"name":      d.Name,
+		"phone":     d.Phone,
+		"status":    d.Status,
+	}
+}
+
+// Me GET /api/driver/me — 司機個資與目前狀態（App 首頁顯示，取代信任本地）
+func (h *DriverHandler) Me(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
+	d, err := h.drivers.Me(driverID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "找不到司機"})
+		return
+	}
+	c.JSON(http.StatusOK, driverPublic(d))
+}
+
+// Online POST /api/driver/online — 顯式上線（設為待命，重新進入派單池）
+func (h *DriverHandler) Online(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
+	d, err := h.drivers.GoOnline(driverID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, driverPublic(d))
+}
+
+// Offline POST /api/driver/offline — 顯式下線（乾淨移出派單池）；載客中回 409
+func (h *DriverHandler) Offline(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
+	d, err := h.drivers.GoOffline(driverID)
+	if err != nil {
+		if errors.Is(err, service.ErrDriverOnTrip) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, driverPublic(d))
+}
+
+// ActiveRide GET /api/driver/rides/active — 司機當前進行中訂單（App 中途重啟恢復行程）。
+// 無進行中訂單時回 {"ride": null}，非錯誤。
+func (h *DriverHandler) ActiveRide(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
+	ride, err := h.rides.GetActiveRideByDriver(driverID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ride": ride})
 }
 
 func (h *DriverHandler) issueToken(driverID int64) (string, error) {
