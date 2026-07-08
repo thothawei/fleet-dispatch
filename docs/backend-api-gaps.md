@@ -26,9 +26,9 @@
 | # | Method | Path | 認證 | 說明 | 複用 |
 |---|---|---|---|---|---|
 | 1 | POST | `/api/rides` | customer JWT | **App 直接下單叫車**（帶上車/目的地座標）。目前叫車只存在於 LINE webhook 內部，App 無 HTTP 下單入口 | `RideService.CreateFromLocation`（改吃 customer→line_user_id 對應，而非 LINE source） |
-| 2 | GET | `/api/customer/rides/active` | customer JWT | 乘客當前進行中訂單（App 啟動/重連要靠它取得 ride_id 才能 WS 訂閱） | 新增 `GetActiveRideByCustomer` |
-| 3 | GET | `/api/customer/rides/:id` | customer JWT | 乘客看自己單一訂單狀態/司機/ETA | 複用 ride repo，加 owner 檢查 |
-| 4 | POST | `/api/rides/:id/cancel-by-customer` | customer JWT | 乘客端 App 取消（現取消只認 LINE 文字「取消」） | `DispatchService.CancelByCustomer`（改吃 customer_id） |
+| 2 | GET | `/api/customer/rides/active` | customer JWT | ✅ 已實作（`RideQueryService.GetActiveRideByCustomer`，`internal/handler/ride.go` `ActiveByCustomer`）。乘客當前進行中訂單（App 啟動/重連要靠它取得 ride_id 才能 WS 訂閱） | 新增 `GetActiveRideByCustomer` |
+| 3 | GET | `/api/customer/rides/:id` | customer JWT | ✅ 已實作（`RideQueryService.GetRideForCustomer`，`internal/handler/ride.go` `GetByCustomer`，含 owner 檢查）。乘客看自己單一訂單狀態/司機/ETA | 複用 ride repo，加 owner 檢查 |
+| 4 | POST | `/api/rides/:id/cancel-by-customer` | customer JWT | ✅ 已實作（`DispatchService.CancelByCustomerID`，`internal/handler/ride.go` `CancelByCustomer`，複用 `cancelActiveRide` 核心）。乘客端 App 取消（現取消只認 LINE 文字「取消」） | `DispatchService.CancelByCustomer`（改吃 customer_id） |
 
 > 註：#1、#4 的 service 已存在但入參綁 `line_user_id`；需讓乘客 JWT 能映射到對應 customer 的 line_user_id（M5-CUSTOMER-AUTH 的 customers 表已存 line_user_id）。
 
