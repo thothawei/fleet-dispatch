@@ -21,11 +21,11 @@
 
 ---
 
-## P0 — 擋住乘客 App 端到端（最優先）
+## P0 — 擋住乘客 App 端到端 ✅ 全數完成（2026-07-07）
 
 | # | Method | Path | 認證 | 說明 | 複用 |
 |---|---|---|---|---|---|
-| 1 | POST | `/api/rides` | customer JWT | **App 直接下單叫車**（帶上車/目的地座標）。目前叫車只存在於 LINE webhook 內部，App 無 HTTP 下單入口 | `RideService.CreateFromLocation`（改吃 customer→line_user_id 對應，而非 LINE source） |
+| 1 | POST | `/api/rides` | customer JWT | ✅ 已實作（`RideService.CreateByCustomer` 含進行中訂單守門，`internal/handler/ride.go` `Create`，commit 4f2ec93）。App 直接下單叫車（帶上車/目的地座標） | 複用 `CreateFromLocation` 核心 |
 | 2 | GET | `/api/customer/rides/active` | customer JWT | ✅ 已實作（`RideQueryService.GetActiveRideByCustomer`，`internal/handler/ride.go` `ActiveByCustomer`）。乘客當前進行中訂單（App 啟動/重連要靠它取得 ride_id 才能 WS 訂閱） | 新增 `GetActiveRideByCustomer` |
 | 3 | GET | `/api/customer/rides/:id` | customer JWT | ✅ 已實作（`RideQueryService.GetRideForCustomer`，`internal/handler/ride.go` `GetByCustomer`，含 owner 檢查）。乘客看自己單一訂單狀態/司機/ETA | 複用 ride repo，加 owner 檢查 |
 | 4 | POST | `/api/rides/:id/cancel-by-customer` | customer JWT | ✅ 已實作（`DispatchService.CancelByCustomerID`，`internal/handler/ride.go` `CancelByCustomer`，複用 `cancelActiveRide` 核心）。乘客端 App 取消（現取消只認 LINE 文字「取消」） | `DispatchService.CancelByCustomer`（改吃 customer_id） |
@@ -90,8 +90,9 @@
 ## 建議實作順序
 
 ```
-P0(#1→#2→#3→#4)  ← 解鎖乘客 App 端到端，先做
-  → 安全洞(track/reports 補認證，順手)
+~~P0(#1→#2→#3→#4)~~ ✅ 已完成（2026-07-07），乘客 App 端到端已解鎖
+  → 安全洞(track/reports 補認證，順手) ← 下一步，2026-07-08 複查仍未補
+
   → P1(#5~#8 司機 App 可靠性)
   → P2(#9,#10 後台寫入) 與前端 C2/C3 對接
   → P3(#13,#14 推播) 配合 App A2/FCM

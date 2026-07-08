@@ -3,8 +3,31 @@
 > 建立：2026-07-07。範圍：**line-fleet-dispatch（後端）／line-fleet-app（雙端 App）／line-fleet-admin（營運後台前端）** 三個 repo。
 > 目的：盤點「現在到底有什麼、還缺什麼」，把缺口拆成可勾選、可續接的待辦清單，之後照本文件逐項執行即可。
 > 上位文件：[roadmap.md](roadmap.md)（Phase A~D）、[dual-client design](superpowers/specs/2026-07-06-fleet-dual-client-design.md)。
->
-> ⚠️ **[STATUS.md](STATUS.md) 已過時**（停在 2026-07-06）：它記「App 僅 flutter create scaffold」，但本文件實測時**司機端 App 已完整實作到行程收尾**。以本文件的現況快照為準；收尾時應回頭同步 STATUS.md。
+> [STATUS.md](STATUS.md) 已於 2026-07-08 同步至本文件現況。
+
+## 0.1 2026-07-08 複查更新（實測程式碼回填）
+
+當日盤點三 repo 現況，以下項目**已完成**並在下方勾選（各附證據）：
+
+- **D5** App 直接下單端點 `POST /api/rides` → 已上線（`cmd/server/main.go` customerAuthed 群組；`RideService.CreateByCustomer`）。連帶 P0 #2/#3/#4（進行中訂單/單筆查詢/App 取消）也全數完成，見 [backend-api-gaps.md](backend-api-gaps.md)。
+- **A3** 司機端測試 → `test/widget_test.dart` 76 行：行程狀態機 + WS 事件解析（commit 7ef6370）。
+- **C1** 訂單詳情 + 軌跡回放 → `src/pages/OrderDetailPage.tsx`（commit 1702fec）。
+- **E1** line-fleet-app 遠端 → `github.com/thothawei/fleet-app`，已 push 同步。
+
+**→ B2 的依賴（D5）已解除，乘客端 App（M7）可直接動工，是目前最大缺口。**
+
+仍未動的重點缺口（優先序）：
+1. **B. 乘客端 App M7 = 0%**（`main_customer.dart` 仍是 placeholder）
+2. **後端安全洞**：`GET /api/rides/:id/track`、`GET /api/reports/daily` 仍無認證（main.go 公開群組）
+3. **A1 背景定位**（pubspec 只有 geolocator，無 background 方案）＋ **A2/D1 FCM 推播**（無 firebase 依賴、無 device_tokens migration）
+4. **P1 司機 API**（me/online/offline/rides/active/decline 皆不存在於路由）
+5. **D4 ride_events 審計表**（migrations 只到 000007，未建）
+6. **C2/C3/D2/D3 後台寫入**（admin 路由全 GET）
+7. **C4 admin 無測試無 code-splitting、C5 視覺驗證未做**
+8. **E2 CI 三 repo 全無**（皆無 .github/workflows）、E3 生產部署、E4 監控
+9. **A4 文件回填**：M6 計畫勾選框仍全空（本次僅回填本文件與 STATUS，M6 計畫留給收尾時附實跑證據再勾）
+
+各 repo 端的可執行清單：App → `line-fleet-app/docs/TODO.md`、後台 → `line-fleet-admin/docs/TODO.md`、後端端點 → [backend-api-gaps.md](backend-api-gaps.md)。
 
 ---
 
@@ -34,8 +57,7 @@
   - 驗收：鎖屏 10 分鐘後，後台地圖上該司機座標仍持續更新。
 - [ ] **A2. FCM 推播收派單**（與後端 D1 綁）：App 被系統殺掉時，靠推播喚醒收派單。需 Firebase 專案 + 真裝置。
   - 驗收：App 完全關閉 → 叫車 → 手機跳推播 → 點開可接單。
-- [ ] **A3. 司機端測試**：目前只有預設 `widget_test.dart`。補 controller 狀態機單元測試（offer→accept→pickup→complete / abandon 分支）。
-  - 驗收：`flutter test` 綠，覆蓋接單與放棄兩條路徑。
+- [x] **A3. 司機端測試**：✅ 2026-07-07 完成（commit 7ef6370）。`test/widget_test.dart` 76 行，覆蓋行程狀態機（接單→上車→完成／放棄）與 WS 事件解析。
 - [ ] **A4. 回填 M6 計畫勾選框**、更新 STATUS.md 司機端段落。
 - [ ] **A5. iOS build**（延後）：需完整 Xcode + CocoaPods；背景定位的 iOS 權限設定（`Info.plist` 的 location always）。
 
@@ -46,7 +68,7 @@
 後端乘客側已就緒（`customer` JWT、WS 訂閱、`/rides/:id/track`），只差前端。建議照司機端的 `lib/core/` 共用層開 `lib/customer/`。
 
 - [ ] **B1. 乘客登入/註冊**（重用 `core/api` + `token_storage`）。
-- [ ] **B2. 地圖叫車**：選上車點/目的地 → 送單。需決定叫車下單的後端端點（目前下單走 LINE webhook，App 直接下單的 `POST /api/rides` **後端可能尚未有**，見 D5，需先補）。
+- [ ] **B2. 地圖叫車**：選上車點/目的地 → 送單。後端端點 `POST /api/rides` **已就緒**（D5 已完成，2026-07-07），可直接串。
 - [ ] **B3. 即時追蹤**：WS 訂閱司機位置 + ETA，地圖上看車移動。
 - [ ] **B4. 行程狀態流**：已派單/司機接單/抵達/上車/完成 的畫面切換。
 - [ ] **B5. 完成後評分/付款入口**（依賴 Phase C 的評分/金流；可先留位）。
@@ -59,8 +81,7 @@
 
 現有頁面全是唯讀，且部分後端端點尚未串。
 
-- [ ] **C1. 訂單詳情 + 軌跡回放**：後端 `GET /api/admin/rides/:id` 與 `GET /api/rides/:id/track`（回 GeoJSON）已存在，前端頁面未做。在地圖上重播行程軌跡。
-  - 驗收：點訂單 → 進詳情 → 地圖畫出完整軌跡線。
+- [x] **C1. 訂單詳情 + 軌跡回放**：✅ 2026-07-07 完成（commit 1702fec，`src/pages/OrderDetailPage.tsx`）。注意：C5 的視覺截圖驗證仍未做，詳情頁一併列入。
 - [ ] **C2. 司機審核啟用/停用 UI**（依賴 D2 後端寫入端點，否則是假按鈕）。
 - [ ] **C3. 派單參數設定頁**（依賴 D3 後端寫入端點）。
 - [ ] **C4. 前端測試 + bundle 拆分**：目前無測試、單包 >500KB。加 code-splitting（路由層 lazy import）、關鍵頁 component 測試。
@@ -77,7 +98,7 @@
 - [ ] **D3. 後台寫入 API — 派單參數設定**：逾時秒數、搜尋半徑、節流門檻等改為可線上調整（現多為 env/常數）。
 - [ ] **D4. `ride_events` 審計表**（Phase B2 剩項）：記錄每次狀態轉換與時間，供訂單詳情/稽核。
   - 驗收：跑一趟後，`ride_events` 有派單→接單→上車→完成的完整時間序列。
-- [ ] **D5. App 直接下單端點 `POST /api/rides`**（撐 B2）：確認/補齊乘客 App 不經 LINE 的下單路徑（帶乘客 JWT、上車/目的地座標），複用既有 dispatch service。
+- [x] **D5. App 直接下單端點 `POST /api/rides`**：✅ 2026-07-07 完成（commit 4f2ec93/845f16d，`RideService.CreateByCustomer` 含進行中訂單守門）。P0 #2/#3/#4 同批完成。
 - [ ] **D6. RBAC 多角色**：目前單一 admin = 全權限。若要多後台使用者/權限分級再做（優先度低）。
 - [ ] **D7. Phase C 產品功能**（依商業需求）：C1 計費（PostGIS 里程 + 費率表）、C2 評分、C3 金流（你本業最熟）、C4 Prometheus `/metrics`。
 
@@ -85,7 +106,7 @@
 
 ## E. 跨專案 / DevOps / 上線
 
-- [ ] **E1. line-fleet-app 建 git 遠端**：目前僅本機 commit，無遠端（另兩 repo 已在 thothawei 的 GitHub）。
+- [x] **E1. line-fleet-app 建 git 遠端**：✅ 完成，`github.com/thothawei/fleet-app`，main 已 push 同步。
 - [ ] **E2. CI/CD**：三 repo 皆無 CI。至少後端 `go test`、前端 `tsc + build`、App `flutter analyze/test` 的 pipeline。
 - [ ] **E3. 生產部署**：目前只有 dev 用 docker-compose。缺正式環境（DB 備援、TLS、secrets 管理、OSRM/Redis/PG 的 prod 配置）。
 - [ ] **E4. 監控與告警**（接 D7-C4）：Prometheus + Grafana 面板（派單成功率、接單耗時、在線司機數、API 延遲）。
@@ -96,9 +117,9 @@
 
 **若目標是「最快跑出乘客也能用的完整 demo」**（推薦）：
 ```
-D5 (App 下單端點) → B (乘客端 App 全鏈路) → A1 (司機背景定位)
+~~D5~~（已完成）→ B (乘客端 App 全鏈路) → A1 (司機背景定位)
 ```
-理由：後端與司機端已幾乎完備，乘客端是唯一擋住「端到端不靠 LINE」的缺口；補 D5 就能讓 B 動工，做完就有雙端 App 完整 demo。
+理由：後端與司機端已幾乎完備，乘客端是唯一擋住「端到端不靠 LINE」的缺口；D5 已補完（2026-07-07），**B 可直接動工**，做完就有雙端 App 完整 demo。順手先補後端兩個無認證安全洞（track/reports）。
 
 **若目標是「作品深度/生產化」**：
 ```
