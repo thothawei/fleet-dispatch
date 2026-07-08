@@ -29,7 +29,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 - **smoke_test.sh 同步（2026-07-08）**：track 帶司機 JWT、日報改 admin JWT；對齊 M5 安全改動。
 
 ### 司機端 App（line-fleet-app，Flutter）— M6 主鏈路完成
-- 登入 → 上線 → 前景 GPS 回報 → WS 收派單 → 接單 → Google Maps 導航 → 上車 → **導航去目的地** → 完成／放棄，全鏈路已實作（`lib/core/` + `lib/driver/`）。
+- 登入 → 上線 → **前景服務 GPS 持續回報**（A1，2026-07-08）→ WS 收派單 → 接單 → Google Maps 導航 → 上車 → **導航去目的地** → 完成／放棄，全鏈路已實作（`lib/core/` + `lib/driver/`）。
 - 單元測試：行程狀態機 + WS 事件解析 + dropoff 鏈路（`test/widget_test.dart`，21 項全過）。
 - 環境：Flutter 3.44.4 + Android SDK 36 + **JDK 17**（JDK 26 會壞 build）；模擬器 AVD `m6_pixel`。
 
@@ -49,7 +49,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 > `line-fleet-app/docs/TODO.md`、`line-fleet-admin/docs/TODO.md`。
 
 1. **M7 乘客端收尾**（主鏈路已通，補 polish）：填 Google Maps API key 顯示地圖選點與即時追蹤地圖；B5 評分/付款入口（依賴 Phase C）；端到端模擬器整條驗收截圖。
-2. **A1 司機背景定位**：現只有 geolocator 前景回報，「解 LIFF 死穴」賣點未兌現。
+2. ~~**A1 司機背景定位**~~：✅ 已實作（2026-07-08，line-fleet-app）。`getPositionStream` + Android 前景服務通知；**待真機驗收**鎖屏 10 分鐘後座標仍更新。
 3. **A2/D1 FCM 推播**：App 被殺收派單。需推播抽象層 + `device_tokens` 表（migration 未建）+ Firebase 專案 + 真裝置。
 4. **P1 小尾巴**：`ride.assigned` 派單事件仍不帶 dropoff（接單前看不到目的地；接單後/active 查詢已有）。LINE 叫車不帶目的地。
 5. **D4 `ride_events` 審計表**：migrations 只到 000007，未建。
