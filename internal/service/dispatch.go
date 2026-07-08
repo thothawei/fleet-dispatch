@@ -416,7 +416,7 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 	return "接單成功", nil
 }
 
-// NotifyCustomerETA 司機位置更新時通知客戶 ETA
+// NotifyCustomerETA 司機位置更新時通知客戶 ETA（LINE 推播 + WS driver.location 給乘客 App 地圖追蹤）
 func (s *DispatchService) NotifyCustomerETA(ctx context.Context, ride *model.Ride, driverLat, driverLng float64) {
 	if ride.Status != constants.RideStatusAccepted {
 		return
@@ -426,6 +426,16 @@ func (s *DispatchService) NotifyCustomerETA(ctx context.Context, ride *model.Rid
 		return
 	}
 	etaSec, distM := s.eta.PickupETA(ctx, driverLat, driverLng, pickupLat, pickupLng)
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:   events.TypeDriverLocation,
+		RideID: ride.ID,
+		Payload: map[string]any{
+			"lat":     driverLat,
+			"lng":     driverLng,
+			"eta_sec": etaSec,
+			"dist_m":  distM,
+		},
+	})
 	customerLineID, err := s.rides.GetCustomerLineUserID(ride.ID)
 	if err != nil || customerLineID == "" {
 		return

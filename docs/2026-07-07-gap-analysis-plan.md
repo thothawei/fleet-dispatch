@@ -84,8 +84,8 @@
 現有頁面全是唯讀，且部分後端端點尚未串。
 
 - [x] **C1. 訂單詳情 + 軌跡回放**：✅ 2026-07-07 完成（commit 1702fec，`src/pages/OrderDetailPage.tsx`）。注意：C5 的視覺截圖驗證仍未做，詳情頁一併列入。
-- [ ] **C2. 司機審核啟用/停用 UI**（依賴 D2 後端寫入端點，否則是假按鈕）。
-- [ ] **C3. 派單參數設定頁**（依賴 D3 後端寫入端點）。
+- [x] **C2. 司機審核啟用/停用 UI**（依賴 D2 後端寫入端點，否則是假按鈕）。✅ 2026-07-08（line-fleet-admin）。
+- [x] **C3. 派單參數設定頁**（依賴 D3 後端寫入端點）。✅ 2026-07-08（line-fleet-admin）。
 - [ ] **C4. 前端測試 + bundle 拆分**：目前無測試、單包 >500KB。加 code-splitting（路由層 lazy import）、關鍵頁 component 測試。
 - [ ] **C5. 視覺驗證**：至今未截圖驗證（先前瀏覽器自動化不可用）。用 preview/瀏覽器實際載入各頁確認渲染。
 
@@ -112,7 +112,7 @@
 ## E. 跨專案 / DevOps / 上線
 
 - [x] **E1. line-fleet-app 建 git 遠端**：✅ 完成，`github.com/thothawei/fleet-app`，main 已 push 同步。
-- [ ] **E2. CI/CD**：三 repo 皆無 CI。至少後端 `go test`、前端 `tsc + build`、App `flutter analyze/test` 的 pipeline。
+- [x] **E2. CI/CD**：✅ 三 repo 皆有（App `flutter-ci.yml`、admin `ci.yml`、後端 `go-ci.yml` 2026-07-08）。生產部署／監控仍屬 E3/E4。
 - [ ] **E3. 生產部署**：目前只有 dev 用 docker-compose。缺正式環境（DB 備援、TLS、secrets 管理、OSRM/Redis/PG 的 prod 配置）。
 - [ ] **E4. 監控與告警**（接 D7-C4）：Prometheus + Grafana 面板（派單成功率、接單耗時、在線司機數、API 延遲）。
 

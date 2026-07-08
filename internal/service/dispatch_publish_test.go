@@ -1,11 +1,14 @@
 package service
 
 import (
+	"context"
 	"sync"
 	"testing"
 
+	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/events"
 	"line-fleet-dispatch/internal/model"
+	"line-fleet-dispatch/internal/repository"
 )
 
 // fakePublisher 記錄收到的發佈，供斷言
@@ -77,5 +80,42 @@ func TestRideAssignedPayload_無Dropoff時省略欄位(t *testing.T) {
 	}
 	if _, ok := payload["dropoff_lat"]; ok {
 		t.Fatal("不應有 dropoff_lat")
+	}
+}
+
+func TestNotifyCustomerETA_發佈driverLocation給乘客(t *testing.T) {
+	fp := &fakePublisher{}
+	db := newServiceTestDB(t)
+	rides := repository.NewRideRepository(db)
+	customers := repository.NewCustomerRepository(db)
+	cust, err := customers.FindOrCreateByLineUserID("U_eta_ws", "乘客")
+	if err != nil {
+		t.Fatalf("建立乘客失敗：%v", err)
+	}
+	ride := newTestRide(t, rides, cust.ID, constants.RideStatusAccepted)
+	s := &DispatchService{
+		rides:     rides,
+		eta:       NewETAService(nil),
+		publisher: fp,
+	}
+	s.NotifyCustomerETA(context.Background(), ride, 25.05, 121.52)
+	if fp.count() != 1 {
+		t.Fatalf("預期 WS 發佈 1 則，得到 %d", fp.count())
+	}
+	got := fp.recv[0]
+	if got.Rec.Role != events.RoleCustomer || got.Rec.ID != cust.ID {
+		t.Fatalf("收件人錯誤: %+v", got.Rec)
+	}
+	if got.Ev.Type != events.TypeDriverLocation || got.Ev.RideID != ride.ID {
+		t.Fatalf("事件錯誤: %+v", got.Ev)
+	}
+	if got.Ev.Payload["lat"] != 25.05 || got.Ev.Payload["lng"] != 121.52 {
+		t.Fatalf("座標錯誤: %v", got.Ev.Payload)
+	}
+	if _, ok := got.Ev.Payload["eta_sec"]; !ok {
+		t.Fatal("應含 eta_sec")
+	}
+	if _, ok := got.Ev.Payload["dist_m"]; !ok {
+		t.Fatal("應含 dist_m")
 	}
 }

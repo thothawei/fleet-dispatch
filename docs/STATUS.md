@@ -55,10 +55,10 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
    `POST/DELETE /api/{driver,customer}/device-token`、派單時並發 App 推播。**真 FCM/APNs 與 App A2 註冊 token 仍待** Firebase／真裝置。
 4. ~~**P1 小尾巴**~~：✅ 已完成（2026-07-08）。`ride.assigned` 事件已帶 `dropoff_address/lat/lng`；司機接單前可預覽目的地。LINE 叫車仍無目的地（設計取捨）。
 5. ~~**D4 `ride_events` 審計表**~~：✅ 2026-07-08。migration `000009`、狀態轉換寫入（叫車/派單/接單/抵達/上車/完成/取消/重派）、`GET /api/admin/rides/:id` 回傳 `events`。
-6. ~~**後台寫入（後端 P2）**~~：✅ 2026-07-08 API 已完成。**待前端** C2 司機啟停 UI、C3 派單參數頁、訂單強制取消按鈕。
-7. **品質**：C4 admin 無測試；C5 各頁視覺截圖驗證未做；~~A4 M6 計畫勾選~~ ✅ 2026-07-08 已回填（`docs/superpowers/plans/2026-07-07-m6-driver-app.md`，證據以 commit/`flutter test` 為主；A1 真機長跑仍待）。本機 Go 整合測試需完整 Xcode（CGO stdlib.h）。
-8. **DevOps**：~~E2 App CI~~ ✅ 2026-07-08（`line-fleet-app` `.github/workflows/flutter-ci.yml`：analyze + test）。後端／admin 尚無 CI；E3 生產部署（現僅 dev docker-compose）；E4 監控（Prometheus/Grafana）。
-9. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D6 RBAC 多角色；D7 Phase C 計費/評分/金流/metrics。
+6. ~~**後台寫入（後端 P2 + 前端 C2/C3）**~~：✅ 後端 API 2026-07-08；前端（line-fleet-admin）司機啟停、派單參數、強制取消亦已完成。**D4 前端**：✅ 訂單詳情「狀態時間軸」顯示 `events`（2026-07-08）。
+7. **品質**：admin 測試／C5 視覺驗證已在 admin repo 完成；~~A4 M6 計畫勾選~~ ✅。本機 Go 整合測試需完整 Xcode（CGO stdlib.h）或 Docker PostGIS。
+8. **DevOps**：~~E2 App CI~~ ✅；~~E2 admin CI~~ ✅；~~E2 後端 CI~~ ✅ 2026-07-08（`.github/workflows/go-ci.yml`：build + 單元測）。仍待：E3 生產部署、E4 監控。
+9. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D6 RBAC 多角色；D7 Phase C 計費/評分/金流/metrics。Maps API key／真 FCM 屬外部依賴。
 
 ## 環境備忘
 - Flutter/Android 環境變數在 `~/.zshrc`（JAVA_HOME→openjdk@17、ANDROID_HOME、PATH）。Bash 工具跨回合 cwd 會重設，跑 flutter/adb 前自行 export。
