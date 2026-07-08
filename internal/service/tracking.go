@@ -27,10 +27,10 @@ type etaPushState struct {
 
 // TrackingService 位置回報、圍籬偵測、軌跡記錄、ETA 推播節流
 type TrackingService struct {
-	drivers  *repository.DriverRepository
-	rides    *repository.RideRepository
-	tracks   *repository.TrackRepository
-	redis    *redisstore.Store
+	drivers   *repository.DriverRepository
+	rides     *repository.RideRepository
+	tracks    *repository.TrackRepository
+	redis     *redisstore.Store
 	line      *lineclient.Client
 	dispatch  *DispatchService
 	publisher events.Publisher
@@ -163,17 +163,26 @@ func (s *TrackingService) checkGeofence(ctx context.Context, ride *model.Ride, l
 	})
 }
 
-// PickUp 司機確認客戶上車
-func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) error {
+// PickUpResult 回給司機端上車後導航去目的地所需的資訊。
+// HasDropoffPoint 為 false 時代表該訂單未指定目的地座標（DropoffAddress 可能仍有值）。
+type PickUpResult struct {
+	DropoffAddress  string
+	DropoffLat      float64
+	DropoffLng      float64
+	HasDropoffPoint bool
+}
+
+// PickUp 司機確認客戶上車，回傳目的地資訊供司機端顯示「導航去目的地」。
+func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) (*PickUpResult, error) {
 	ride, err := s.rides.GetByID(rideID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if ride.DriverID == nil || *ride.DriverID != driverID {
-		return ErrForbidden
+		return nil, ErrForbidden
 	}
 	if err := s.rides.MarkPickedUp(rideID); err != nil {
-		return err
+		return nil, err
 	}
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:   events.TypeRidePickedUp,
@@ -183,7 +192,12 @@ func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) er
 	if customerLineID != "" {
 		_ = s.line.PushText(ctx, customerLineID, "行程開始，祝您旅途愉快")
 	}
-	return nil
+
+	res := &PickUpResult{DropoffAddress: ride.DropoffAddress}
+	if lat, lng, ok, _ := s.rides.GetDropoffCoords(rideID); ok {
+		res.DropoffLat, res.DropoffLng, res.HasDropoffPoint = lat, lng, true
+	}
+	return res, nil
 }
 
 // Complete 完成行程

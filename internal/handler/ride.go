@@ -61,14 +61,22 @@ func (h *RideHandler) Accept(c *gin.Context) {
 }
 
 // PickUp POST /api/rides/:id/pickup
+// 回應帶目的地資訊，供司機端顯示「導航去目的地」：dropoff_address 一律回傳（可能為空字串），
+// 有目的地座標時另附 dropoff_lat / dropoff_lng。
 func (h *RideHandler) PickUp(c *gin.Context) {
 	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	driverID := middleware.DriverIDFromCtx(c)
-	if err := h.tracking.PickUp(c.Request.Context(), rideID, driverID); err != nil {
+	res, err := h.tracking.PickUp(c.Request.Context(), rideID, driverID)
+	if err != nil {
 		c.JSON(statusForErr(err), gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	resp := gin.H{"ok": true, "dropoff_address": res.DropoffAddress}
+	if res.HasDropoffPoint {
+		resp["dropoff_lat"] = res.DropoffLat
+		resp["dropoff_lng"] = res.DropoffLng
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // Complete POST /api/rides/:id/complete
@@ -109,16 +117,21 @@ func (h *RideHandler) Track(c *gin.Context) {
 func (h *RideHandler) Create(c *gin.Context) {
 	customerID := middleware.CustomerIDFromCtx(c)
 	var req struct {
-		PickupLat     float64 `json:"pickup_lat"`
-		PickupLng     float64 `json:"pickup_lng"`
-		PickupAddress string  `json:"pickup_address"`
+		PickupLat      float64 `json:"pickup_lat"`
+		PickupLng      float64 `json:"pickup_lng"`
+		PickupAddress  string  `json:"pickup_address"`
+		DropoffLat     float64 `json:"dropoff_lat"`
+		DropoffLng     float64 `json:"dropoff_lng"`
+		DropoffAddress string  `json:"dropoff_address"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
 		return
 	}
 	ride, err := h.rideService.CreateByCustomer(
-		c.Request.Context(), customerID, req.PickupLat, req.PickupLng, req.PickupAddress,
+		c.Request.Context(), customerID,
+		req.PickupLat, req.PickupLng, req.PickupAddress,
+		req.DropoffLat, req.DropoffLng, req.DropoffAddress,
 	)
 	if err != nil {
 		c.JSON(createStatusForErr(err), gin.H{"error": err.Error()})

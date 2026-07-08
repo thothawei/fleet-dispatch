@@ -345,9 +345,15 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		RideID:  rideID,
 		Payload: map[string]any{"driver_name": driver.Name, "eta_sec": etaSec},
 	})
+	// 司機端事件帶目的地，讓 App 一接單就能預載「導航去目的地」資訊
+	driverPayload := map[string]any{"dropoff_address": ride.DropoffAddress}
+	if dropLat, dropLng, ok, _ := s.rides.GetDropoffCoords(rideID); ok {
+		driverPayload["dropoff_lat"], driverPayload["dropoff_lng"] = dropLat, dropLng
+	}
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
-		Type:   events.TypeRideAccepted,
-		RideID: rideID,
+		Type:    events.TypeRideAccepted,
+		RideID:  rideID,
+		Payload: driverPayload,
 	})
 
 	return "接單成功", nil

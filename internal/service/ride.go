@@ -7,8 +7,8 @@ import (
 
 	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/model"
-	"line-fleet-dispatch/internal/repository"
 	redisstore "line-fleet-dispatch/internal/redis"
+	"line-fleet-dispatch/internal/repository"
 )
 
 // RideRequest 客戶叫車輸入
@@ -87,6 +87,8 @@ func (s *RideService) CreateByCustomer(
 	customerID int64,
 	pickupLat, pickupLng float64,
 	pickupAddress string,
+	dropoffLat, dropoffLng float64,
+	dropoffAddress string,
 ) (*model.Ride, error) {
 	if err := validatePickupCoords(pickupLat, pickupLng); err != nil {
 		return nil, err
@@ -115,13 +117,18 @@ func (s *RideService) CreateByCustomer(
 
 	now := time.Now()
 	ride := &model.Ride{
-		CustomerID:    customer.ID,
-		Status:        constants.RideStatusRequested,
-		PickupPoint:   model.GeoPoint{Lat: pickupLat, Lng: pickupLng},
-		PickupAddress: pickupAddress,
-		RequestedAt:   now,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		CustomerID:     customer.ID,
+		Status:         constants.RideStatusRequested,
+		PickupPoint:    model.GeoPoint{Lat: pickupLat, Lng: pickupLng},
+		PickupAddress:  pickupAddress,
+		DropoffAddress: dropoffAddress,
+		RequestedAt:    now,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	// dropoff 座標為選填：兩者皆有效才寫入，否則留 nil（dropoff_point 存 NULL）
+	if dropoffLat != 0 || dropoffLng != 0 {
+		ride.DropoffPoint = &model.GeoPoint{Lat: dropoffLat, Lng: dropoffLng}
 	}
 	if err := s.rides.Create(ride); err != nil {
 		return nil, err

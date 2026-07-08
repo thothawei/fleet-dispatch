@@ -74,13 +74,21 @@ func NewRideRepository(db *gorm.DB) *RideRepository {
 }
 
 func (r *RideRepository) Create(ride *model.Ride) error {
+	// dropoff 為選填：未提供座標時傳 nil，ST_MakePoint(NULL,NULL) 會產生 NULL point
+	var dropLng, dropLat interface{}
+	if ride.DropoffPoint != nil {
+		dropLng, dropLat = ride.DropoffPoint.Lng, ride.DropoffPoint.Lat
+	}
 	// 用 RETURNING 直接取回自增 id，避免以 requested_at 反查造成的競態/誤取
 	return r.db.Raw(`
 		INSERT INTO rides (
 			customer_id, status, pickup_point, pickup_address,
+			dropoff_point, dropoff_address,
 			requested_at, created_at, updated_at
 		) VALUES (
 			?, ?,
+			ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+			?,
 			ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
 			?, ?, ?, ?
 		)
@@ -91,6 +99,9 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 		ride.PickupPoint.Lng,
 		ride.PickupPoint.Lat,
 		ride.PickupAddress,
+		dropLng,
+		dropLat,
+		ride.DropoffAddress,
 		ride.RequestedAt,
 		ride.CreatedAt,
 		ride.UpdatedAt,
@@ -254,6 +265,22 @@ func (r *RideRepository) GetPickupCoords(id int64) (lat, lng float64, err error)
 		FROM rides WHERE id = ?
 	`, id).Scan(&result).Error
 	return result.Lat, result.Lng, err
+}
+
+// GetDropoffCoords 讀取訂單的目的地座標。dropoff_point 為 NULL（未指定目的地）時 ok=false。
+func (r *RideRepository) GetDropoffCoords(id int64) (lat, lng float64, ok bool, err error) {
+	var result struct {
+		Lat *float64
+		Lng *float64
+	}
+	err = r.db.Raw(`
+		SELECT ST_Y(dropoff_point::geometry) AS lat, ST_X(dropoff_point::geometry) AS lng
+		FROM rides WHERE id = ?
+	`, id).Scan(&result).Error
+	if err != nil || result.Lat == nil || result.Lng == nil {
+		return 0, 0, false, err
+	}
+	return *result.Lat, *result.Lng, true, nil
 }
 
 func (r *RideRepository) UpdateStatus(id int64, status int16) error {
