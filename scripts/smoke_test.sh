@@ -1,7 +1,8 @@
 #!/bin/sh
-# M1-M4 + A1(JWT) 端到端煙霧測試。
+# M1-M4 + A1(JWT) + M5 安全端點 端到端煙霧測試。
 # 前提：docker compose 已啟動、且為乾淨資料庫（建議先 docker compose down -v）。
 # 請勿在 simulator 同時運行時執行，避免搶單造成干擾。
+# 注意：/api/rides/:id/track 需 MultiAuth JWT；日報改走 /api/admin/reports/daily。
 set -e
 API="${API_URL:-http://localhost:8080}"
 
@@ -63,11 +64,24 @@ echo "== 完成行程 =="
 curl -sf -X POST "$API/api/rides/$RIDE_ID/complete" \
   -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" -d '{}' >/dev/null
 
-echo "== 軌跡回放（GeoJSON Feature）=="
-curl -sf "$API/api/rides/$RIDE_ID/track" | grep -q '"type":"Feature"' || fail "軌跡回放格式錯誤"
+echo "== 軌跡回放未帶 token 應被擋（401）=="
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/api/rides/$RIDE_ID/track")
+[ "$CODE" = "401" ] || fail "未帶 token 存取 track 應回 401，實際 $CODE"
 
-echo "== 日報表（斷言含本次司機）=="
-REPORT=$(curl -sf "$API/api/reports/daily?date=$(date +%Y-%m-%d)")
+echo "== 軌跡回放（GeoJSON Feature，司機 JWT）=="
+curl -sf -H "Authorization: Bearer $TOKEN" "$API/api/rides/$RIDE_ID/track" \
+  | grep -q '"type":"Feature"' || fail "軌跡回放格式錯誤"
+
+echo "== 後台登入（admin/admin）=="
+ADMIN_LOGIN=$(curl -sf -X POST "$API/api/admin/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}')
+ADMIN_TOKEN=$(echo "$ADMIN_LOGIN" | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+[ -n "$ADMIN_TOKEN" ] || fail "後台登入失敗: $ADMIN_LOGIN"
+
+echo "== 日報表（admin JWT，斷言含本次司機）=="
+REPORT=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "$API/api/admin/reports/daily?date=$(date +%Y-%m-%d)")
 echo "$REPORT" | grep -q "\"driver_id\":$DRIVER_ID" || fail "日報表未含本次司機: $REPORT"
 
 echo ""

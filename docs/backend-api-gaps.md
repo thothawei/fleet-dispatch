@@ -2,7 +2,7 @@
 
 > 建立：2026-07-07（line-fleet-dispatch）。承接 [gap-analysis-plan](2026-07-07-gap-analysis-plan.md) 的 D 節，把「後端缺哪些 API」拆到端點層級。
 > 依據：實測 `cmd/server/main.go` 路由 + `internal/handler|service` 現有方法。
-> **重點結論**：叫車/派單/取消/軌跡的核心 service 幾乎都已存在（`RideService.CreateFromLocation`、`DispatchService.*`、`RideQueryService.TrackGeoJSON`），缺的主要是「對 App / 後台暴露 HTTP 端點」與「寫入類後台功能」，而非重寫邏輯。
+> **重點結論**：叫車/派單/取消/軌跡的核心 service 幾乎都已存在（`RideService.CreateFromLocation`、`DispatchService.*`、`RideQueryService.TrackGeoJSON`），缺的主要是「寫入類後台功能」與「推播/Phase C」，而非重寫邏輯。
 
 ---
 
@@ -10,14 +10,21 @@
 
 | Method | Path | 認證 | 說明 |
 |---|---|---|---|
-| POST | `/webhook/line` | LINE 簽章 | LINE 叫車入口（**下單邏輯藏在這**） |
+| POST | `/webhook/line` | LINE 簽章 | LINE 叫車入口（只帶 pickup，無目的地） |
 | GET | `/ws` | JWT | 即時位置/事件通道 |
 | POST | `/api/{driver,customer,admin}/register`·`/login` | 公開 | 三種身分註冊/登入 |
+| POST | `/api/rides` | customer JWT | 乘客 App 下單（可帶 dropoff） |
+| GET | `/api/customer/rides/active`·`/api/customer/rides/:id` | customer JWT | 乘客查進行中/單筆訂單 |
+| POST | `/api/rides/:id/cancel-by-customer` | customer JWT | 乘客 App 取消 |
+| GET | `/api/driver/me` | driver JWT | 司機個人資料 |
+| POST | `/api/driver/online`·`/api/driver/offline` | driver JWT | 司機上線/下線 |
+| GET | `/api/driver/rides/active` | driver JWT | 司機進行中訂單（含 dropoff） |
 | POST | `/api/driver/location` | driver JWT | 回報 GPS |
-| POST | `/api/rides/:id/{accept,pickup,complete,cancel}` | driver JWT | 司機行程操作 |
-| GET | `/api/rides/:id/track` | **無（TODO）** | 軌跡 GeoJSON |
-| GET | `/api/reports/daily` | **無（TODO）** | 日報表 |
+| POST | `/api/rides/:id/{accept,pickup,complete,cancel,decline}` | driver JWT | 司機行程操作 |
+| GET | `/api/rides/:id/track` | MultiAuth JWT | 軌跡 GeoJSON（本趟乘客/司機/admin） |
 | GET | `/api/admin/{fleet,drivers,rides,rides/:id,reports/daily}` | admin JWT | 後台唯讀 |
+
+> 已下架：`GET /api/reports/daily`（公開版，2026-07-08 移除）。
 
 ---
 
@@ -30,7 +37,7 @@
 | 3 | GET | `/api/customer/rides/:id` | customer JWT | ✅ 已實作（`RideQueryService.GetRideForCustomer`，`internal/handler/ride.go` `GetByCustomer`，含 owner 檢查）。乘客看自己單一訂單狀態/司機/ETA | 複用 ride repo，加 owner 檢查 |
 | 4 | POST | `/api/rides/:id/cancel-by-customer` | customer JWT | ✅ 已實作（`DispatchService.CancelByCustomerID`，`internal/handler/ride.go` `CancelByCustomer`，複用 `cancelActiveRide` 核心）。乘客端 App 取消（現取消只認 LINE 文字「取消」） | `DispatchService.CancelByCustomer`（改吃 customer_id） |
 
-> 註：#1、#4 的 service 已存在但入參綁 `line_user_id`；需讓乘客 JWT 能映射到對應 customer 的 line_user_id（M5-CUSTOMER-AUTH 的 customers 表已存 line_user_id）。
+> 註：#1 已支援選填 `dropoff_address`/`dropoff_lat`/`dropoff_lng`（commit 345b7ad）。
 
 ---
 
@@ -40,13 +47,12 @@
 |---|---|---|---|---|
 | 5 | GET | `/api/driver/me` | driver JWT | ✅ `DriverHandler.Me`→`DriverRegistry.Me`。回 driver_id/name/phone/status（不含密碼雜湊） |
 | 6 | POST | `/api/driver/online`·`/api/driver/offline` | driver JWT | ✅ `DriverRegistry.GoOnline/GoOffline`。online→Idle（載客中不降級）、offline→Offline（乾淨移出派單池，dispatch 以 status 過濾）；**載客中下線回 409**（`ErrDriverOnTrip`） |
-| 7 | GET | `/api/driver/rides/active` | driver JWT | ✅ `DriverHandler.ActiveRide`→`RideQueryService.GetActiveRideByDriver`（複用 `FindActiveByDriver`，回 Accepted/PickedUp）。無則 `{"ride":null}`。訂單 JSON 現含 dropoff 欄位（資料層修復後） |
+| 7 | GET | `/api/driver/rides/active` | driver JWT | ✅ `DriverHandler.ActiveRide`→`RideQueryService.GetActiveRideByDriver`（複用 `FindActiveByDriver`，回 Accepted/PickedUp）。無則 `{"ride":null}`。訂單 JSON 含 dropoff 欄位 |
 | 8 | POST | `/api/rides/:id/decline` | driver JWT | ✅ `RideHandler.Decline`→`DispatchService.DeclineOffer`（複用既有）。記錄拒接，重派跳過此司機，司機仍待命 |
 
 > 驗證：service 整合測試（上下線狀態轉移＋載客中守門、GetActiveRideByDriver）＋對真 server 實跑
 > 全部端點（me/online/offline/rides·active/decline 皆回正確狀態；track owner 200／他人 403）。
-> **仍缺（P1 尾巴）**：#7 已能回 dropoff，但**派單事件仍未帶 dropoff，且下單流程從未寫入 dropoff**
-> → 司機「上車後導航去目的地」仍缺資料源。需擴充下單（LINE/App 收目的地）與派單事件 payload。
+> **小尾巴（非阻塞）**：`ride.assigned` 派單事件 payload 仍只有 `address/eta_sec/dist_m`，不含 dropoff；接單後 `ride.accepted` 與 `rides/active` 已有 `dropoff_address`（座標經 JSON `dropoff_point`）。LINE 叫車不帶目的地。
 
 ---
 
@@ -87,16 +93,17 @@
 
 ## 安全洞（既有端點，需補認證，非新增）
 
-- [x] `GET /api/rides/:id/track`：✅ 已補認證（2026-07-08）。新增 `middleware.MultiAuth`（接受 driver/customer/admin 任一合法 token），授權在 `RideQueryService.AuthorizeTrackAccess`——admin 全放行、本趟乘客、被指派司機皆可，其餘 403、訂單不存在 404。後台前端不受影響（其軌跡走 `/admin/rides/:id` 內嵌的 `track_geojson`，非此端點）。
-- [x] `GET /api/reports/daily`：✅ 已下架公開版（2026-07-08）。移除路由與未用的 `reportHandler`，刪除 `internal/handler/report.go`（死碼）；只留 admin 版 `/api/admin/reports/daily`（reportRepo 仍供 admin handler 使用）。
+- [x] `GET /api/rides/:id/track`：✅ 已補認證（2026-07-08）。新增 `middleware.MultiAuth`（接受 driver/customer/admin 任一合法 token），授權在 `RideQueryService.AuthorizeTrackAccess`——admin 全放行、本趟乘客、被指派司機皆可，其餘 403、訂單不存在 404。後台前端不受影響（其軌跡走 `/admin/rides/:id` 內嵌的 `track_geojson`，非此端點）。`scripts/smoke_test.sh` 已同步（2026-07-08）。
+- [x] `GET /api/reports/daily`：✅ 已下架公開版（2026-07-08）。移除路由與未用的 `reportHandler`，刪除 `internal/handler/report.go`（死碼）；只留 admin 版 `/api/admin/reports/daily`（reportRepo 仍供 admin handler 使用）。`smoke_test.sh` 改走 admin JWT。
 
 ---
 
 ## 資料層缺口（2026-07-08 實測確認，影響既有回傳）
 
 - [x] **`GeoPoint.Scan` no-op** → ✅ 已補（2026-07-08）。實作 EWKB 解析（支援大小端、SRID 旗標、hex 字串/位元組/原始位元組三種 pgx 回傳型態，NULL 為 no-op）。單元測試 `internal/model/models_test.go` + 對真 PostGIS 的 round-trip 整合測試 `internal/service/geopoint_roundtrip_test.go`（pickup_point 由 (0,0) 修為正確 25.03/121.56）。
-- [x] `model.Ride` JSON tag → ✅ 已加 snake_case tag（含 `dropoff_point`/`dropoff_address` 暴露）；`GeoPoint` 加 `lat`/`lng` tag。gofmt import 排序修的是 `internal/service/ride.go`（原清單誤記為 handler，handler 實已過 gofmt）。
-- [ ] **司機端拿不到目的地（尚未完成）**：`Ride.DropoffPoint/DropoffAddress` 現已能經 JSON 正確暴露，但**派單事件/司機端點仍未帶 dropoff**，且下單流程從未寫入 dropoff（LINE 與 App 下單都只給 pickup）→ 司機 App「上車後導航去目的地」仍做不到。屬 P1（driver rides/active #7）與下單流程擴充範疇，待該批處理。
+- [x] `model.Ride` JSON tag → ✅ 已加 snake_case tag（含 `dropoff_point`/`dropoff_address` 暴露）；`GeoPoint` 加 `lat`/`lng` tag。
+- [x] **App 下單寫入 dropoff** → ✅ 已補（2026-07-08，commit 345b7ad）。`CreateByCustomer` 持久化 `dropoff_address/lat/lng`；`rides/active` 與 `ride.accepted` WS 事件回傳；司機 App 上車後導航去目的地已通。
+- [ ] **派單事件 dropoff 不完整（小尾巴）**：`ride.assigned` 仍不帶 dropoff（接單前看不到目的地）。LINE 叫車流程不帶目的地（設計取捨）。
 
 ---
 
@@ -104,12 +111,11 @@
 
 ```
 ~~P0(#1→#2→#3→#4)~~ ✅ 已完成（2026-07-07），乘客 App 端到端已解鎖
-~~安全洞(track 補認證 / reports 下架)~~ + ~~資料層(GeoPoint.Scan / JSON tag)~~ ✅ 已完成（2026-07-08）
+~~安全洞(track 補認證 / reports 下架)~~ + ~~資料層(GeoPoint.Scan / JSON tag / dropoff)~~ ✅ 已完成（2026-07-08）
 ~~P1(#5~#8 司機 App 可靠性)~~ ✅ 已完成（2026-07-08）
 
-  → P1 尾巴：下單/派單事件補 dropoff（司機導航目的地資料源）
-  → P2(#9,#10 後台寫入) 與前端 C2/C3 對接
-  → P2(#9,#10 後台寫入) 與前端 C2/C3 對接
+  → P1 小尾巴：ride.assigned 事件補 dropoff（可選，體驗優化）
+  → P2(#9,#10,#11 後台寫入) 與前端 C2/C3 對接
   → P3(#13,#14 推播) 配合 App A2/FCM
   → P4 Phase C 依商業需求
 ```
@@ -119,3 +125,4 @@
 - 全部沿用既有 `Handler → Service → Repository` 分層；下單/取消優先包裝既有 service，不重寫派單。
 - 寫入端點記得補 `ride_events` 審計（gap-plan D4）與整合測試（testcontainers 既有模式）。
 - 完成一段 → 對照驗收實跑 → commit + push（main，thothawei 金鑰）→ 回填本清單勾選框。
+- 煙霧測試：`bash scripts/smoke_test.sh`（track 帶司機 JWT、日報帶 admin JWT）。
