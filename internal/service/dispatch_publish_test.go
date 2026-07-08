@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"line-fleet-dispatch/internal/events"
+	"line-fleet-dispatch/internal/model"
 )
 
 // fakePublisher 記錄收到的發佈，供斷言
@@ -46,5 +47,35 @@ func TestDispatch_publish轉發給Publisher(t *testing.T) {
 	}
 	if fp.recv[0].Rec.ID != 9 || fp.recv[0].Ev.Type != events.TypeRideAssigned {
 		t.Fatalf("發佈內容錯誤: %+v", fp.recv[0])
+	}
+}
+
+func TestRideAssignedPayload_含Dropoff(t *testing.T) {
+	lat, lng := 25.08, 121.57
+	ride := &model.Ride{
+		PickupAddress:  "台北101",
+		DropoffAddress: "松山機場",
+		DropoffPoint:   &model.GeoPoint{Lat: lat, Lng: lng},
+	}
+	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200)
+	if payload["address"] != "台北101" {
+		t.Fatalf("address 錯誤: %v", payload["address"])
+	}
+	if payload["dropoff_address"] != "松山機場" {
+		t.Fatalf("dropoff_address 錯誤: %v", payload["dropoff_address"])
+	}
+	if payload["dropoff_lat"] != lat || payload["dropoff_lng"] != lng {
+		t.Fatalf("dropoff 座標錯誤: %v", payload)
+	}
+}
+
+func TestRideAssignedPayload_無Dropoff時省略欄位(t *testing.T) {
+	ride := &model.Ride{PickupAddress: "台北101"}
+	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200)
+	if _, ok := payload["dropoff_address"]; ok {
+		t.Fatal("不應有 dropoff_address")
+	}
+	if _, ok := payload["dropoff_lat"]; ok {
+		t.Fatal("不應有 dropoff_lat")
 	}
 }

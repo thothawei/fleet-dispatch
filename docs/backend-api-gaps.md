@@ -52,7 +52,7 @@
 
 > 驗證：service 整合測試（上下線狀態轉移＋載客中守門、GetActiveRideByDriver）＋對真 server 實跑
 > 全部端點（me/online/offline/rides·active/decline 皆回正確狀態；track owner 200／他人 403）。
-> **小尾巴（非阻塞）**：`ride.assigned` 派單事件 payload 仍只有 `address/eta_sec/dist_m`，不含 dropoff；接單後 `ride.accepted` 與 `rides/active` 已有 `dropoff_address`（座標經 JSON `dropoff_point`）。LINE 叫車不帶目的地。
+> **小尾巴**：✅ 已完成（2026-07-08）。`ride.assigned` payload 含 `dropoff_address` 與選填 `dropoff_lat/lng`；LINE 叫車不帶目的地（設計取捨）。
 
 ---
 
@@ -103,7 +103,7 @@
 - [x] **`GeoPoint.Scan` no-op** → ✅ 已補（2026-07-08）。實作 EWKB 解析（支援大小端、SRID 旗標、hex 字串/位元組/原始位元組三種 pgx 回傳型態，NULL 為 no-op）。單元測試 `internal/model/models_test.go` + 對真 PostGIS 的 round-trip 整合測試 `internal/service/geopoint_roundtrip_test.go`（pickup_point 由 (0,0) 修為正確 25.03/121.56）。
 - [x] `model.Ride` JSON tag → ✅ 已加 snake_case tag（含 `dropoff_point`/`dropoff_address` 暴露）；`GeoPoint` 加 `lat`/`lng` tag。
 - [x] **App 下單寫入 dropoff** → ✅ 已補（2026-07-08，commit 345b7ad）。`CreateByCustomer` 持久化 `dropoff_address/lat/lng`；`rides/active` 與 `ride.accepted` WS 事件回傳；司機 App 上車後導航去目的地已通。
-- [ ] **派單事件 dropoff 不完整（小尾巴）**：`ride.assigned` 仍不帶 dropoff（接單前看不到目的地）。LINE 叫車流程不帶目的地（設計取捨）。
+- [x] **`ride.assigned` 派單事件 dropoff** → ✅ 已補（2026-07-08）。`rideAssignedPayload` 帶 `dropoff_address/lat/lng`；司機接單前可預覽。LINE 叫車仍無目的地。
 
 ---
 
@@ -114,7 +114,6 @@
 ~~安全洞(track 補認證 / reports 下架)~~ + ~~資料層(GeoPoint.Scan / JSON tag / dropoff)~~ ✅ 已完成（2026-07-08）
 ~~P1(#5~#8 司機 App 可靠性)~~ ✅ 已完成（2026-07-08）
 
-  → P1 小尾巴：ride.assigned 事件補 dropoff（可選，體驗優化）
   → P2(#9,#10,#11 後台寫入) 與前端 C2/C3 對接
   → P3(#13,#14 推播) 配合 App A2/FCM
   → P4 Phase C 依商業需求

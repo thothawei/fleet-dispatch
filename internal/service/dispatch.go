@@ -119,7 +119,7 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		}
 		for _, d := range targets {
 			offered[d.ID] = true
-			s.pushOffer(ctx, d, rideID, ride.PickupAddress, pickupLat, pickupLng)
+			s.pushOffer(ctx, d, ride, pickupLat, pickupLng)
 		}
 		log.Info().Int64("ride_id", rideID).Int("attempt", attempt).Int("offered", len(targets)).Msg("已派單")
 	} else {
@@ -135,22 +135,42 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 	return nil
 }
 
+// rideAssignedPayload 組裝 ride.assigned WS 事件 payload（含選填目的地）。
+func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM int) map[string]any {
+	payload := map[string]any{
+		"address": pickupAddress,
+		"eta_sec": etaSec,
+		"dist_m":  distM,
+	}
+	if ride.DropoffAddress != "" {
+		payload["dropoff_address"] = ride.DropoffAddress
+	}
+	if ride.DropoffPoint != nil {
+		payload["dropoff_lat"] = ride.DropoffPoint.Lat
+		payload["dropoff_lng"] = ride.DropoffPoint.Lng
+	}
+	return payload
+}
+
 // pushOffer 推播單一司機接單邀請（附 ETA 與導航連結）
-func (s *DispatchService) pushOffer(ctx context.Context, driver *model.Driver, rideID int64, address string, pickupLat, pickupLng float64) {
+func (s *DispatchService) pushOffer(ctx context.Context, driver *model.Driver, ride *model.Ride, pickupLat, pickupLng float64) {
 	etaSec, distM := 300, 1000
 	if driverLat, driverLng, ok := s.redis.GetDriverLocation(ctx, driver.ID); ok {
 		etaSec, distM = s.eta.PickupETA(ctx, driverLat, driverLng, pickupLat, pickupLng)
 	}
 	navURL := util.GoogleMapsNavURL(pickupLat, pickupLng)
 	msg := fmt.Sprintf("新派單 #%d\n上車點：%s\n距離約 %d 公尺，ETA %d 分鐘\n導航：%s",
-		rideID, address, distM, etaSec/60, navURL)
-	if err := s.line.PushRideOffer(ctx, driver.LineUserID, rideID, msg); err != nil {
+		ride.ID, ride.PickupAddress, distM, etaSec/60, navURL)
+	if ride.DropoffAddress != "" {
+		msg += fmt.Sprintf("\n目的地：%s", ride.DropoffAddress)
+	}
+	if err := s.line.PushRideOffer(ctx, driver.LineUserID, ride.ID, msg); err != nil {
 		log.Error().Err(err).Int64("driver_id", driver.ID).Msg("推播派單失敗")
 	}
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driver.ID}, events.Event{
 		Type:    events.TypeRideAssigned,
-		RideID:  rideID,
-		Payload: map[string]any{"address": address, "eta_sec": etaSec, "dist_m": distM},
+		RideID:  ride.ID,
+		Payload: rideAssignedPayload(ride, ride.PickupAddress, etaSec, distM),
 	})
 }
 

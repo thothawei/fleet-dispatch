@@ -25,7 +25,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 - **P0 乘客 App 端點（2026-07-07）**：`POST /api/rides` 下單、`GET /api/customer/rides/active`、`GET /api/customer/rides/:id`、`POST /api/rides/:id/cancel-by-customer`。
 - **P1 司機 App 端點（2026-07-08）**：`/api/driver/me`、online/offline、`/api/driver/rides/active`、decline。
 - **安全 + 資料層（2026-07-08）**：`/track` 補 MultiAuth；公開 `/api/reports/daily` 下架；`GeoPoint.Scan` 修復；`Ride`/`GeoPoint` JSON tag。
-- **dropoff 鏈路（2026-07-08）**：App 下單寫入 `dropoff_address/lat/lng`；`rides/active` 回傳 dropoff；`ride.accepted` WS 事件帶 `dropoff_address`；pickup 回應帶 `dropoff_address`。
+- **dropoff 鏈路（2026-07-08）**：App 下單寫入 `dropoff_address/lat/lng`；`rides/active` 回傳 dropoff；`ride.accepted` / **`ride.assigned`** WS 事件帶 dropoff；pickup 回應帶 `dropoff_address`。
 - **smoke_test.sh 同步（2026-07-08）**：track 帶司機 JWT、日報改 admin JWT；對齊 M5 安全改動。
 
 ### 司機端 App（line-fleet-app，Flutter）— M6 主鏈路完成
@@ -51,7 +51,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 1. **M7 乘客端收尾**（主鏈路已通，補 polish）：填 Google Maps API key 顯示地圖選點與即時追蹤地圖；B5 評分/付款入口（依賴 Phase C）；端到端模擬器整條驗收截圖。
 2. ~~**A1 司機背景定位**~~：✅ 已實作（2026-07-08，line-fleet-app）。`getPositionStream` + Android 前景服務通知；**待真機驗收**鎖屏 10 分鐘後座標仍更新。
 3. **A2/D1 FCM 推播**：App 被殺收派單。需推播抽象層 + `device_tokens` 表（migration 未建）+ Firebase 專案 + 真裝置。
-4. **P1 小尾巴**：`ride.assigned` 派單事件仍不帶 dropoff（接單前看不到目的地；接單後/active 查詢已有）。LINE 叫車不帶目的地。
+4. ~~**P1 小尾巴**~~：✅ 已完成（2026-07-08）。`ride.assigned` 事件已帶 `dropoff_address/lat/lng`；司機接單前可預覽目的地。LINE 叫車仍無目的地（設計取捨）。
 5. **D4 `ride_events` 審計表**：migrations 只到 000007，未建。
 6. **後台寫入**：D2 司機停用（須配派單池）+ C2 UI、D3 派單參數設定 + C3 UI、admin 強制取消 — admin 路由目前全 GET。
 7. **品質**：C4 admin 無測試；C5 各頁視覺截圖驗證未做；~~A4 M6 計畫勾選~~ ✅ 2026-07-08 已回填（`docs/superpowers/plans/2026-07-07-m6-driver-app.md`，證據以 commit/`flutter test` 為主；A1 真機長跑仍待）。本機 Go 整合測試需完整 Xcode（CGO stdlib.h）。
