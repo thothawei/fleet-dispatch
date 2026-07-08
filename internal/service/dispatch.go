@@ -369,6 +369,20 @@ func (s *DispatchService) NotifyCustomerETA(ctx context.Context, ride *model.Rid
 		return
 	}
 	etaSec, distM := s.eta.PickupETA(ctx, driverLat, driverLng, pickupLat, pickupLng)
+
+	// 推給對應乘客（App）：司機位置 + 即時 ETA/距離，供「司機接近中」提示（不需地圖）。
+	// 走 shouldPushETA 節流的呼叫點，不會每個 GPS tick 都發。
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:   events.TypeDriverLocation,
+		RideID: ride.ID,
+		Payload: map[string]any{
+			"lat":     driverLat,
+			"lng":     driverLng,
+			"eta_sec": etaSec,
+			"dist_m":  distM,
+		},
+	})
+
 	customerLineID, err := s.rides.GetCustomerLineUserID(ride.ID)
 	if err != nil || customerLineID == "" {
 		return
