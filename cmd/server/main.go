@@ -105,7 +105,7 @@ func main() {
 		hub,
 	)
 	driverRegistry := service.NewDriverRegistry(driverRepo)
-	rideQueryService := service.NewRideQueryService(trackRepo)
+	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
 
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -157,6 +157,9 @@ func main() {
 		customerAuthed.Use(middleware.CustomerAuth(cfg.JWTSecret))
 		{
 			customerAuthed.POST("/rides", rideHandler.Create)
+			customerAuthed.GET("/customer/rides/active", rideHandler.ActiveByCustomer)
+			customerAuthed.GET("/customer/rides/:id", rideHandler.GetByCustomer)
+			customerAuthed.POST("/rides/:id/cancel-by-customer", rideHandler.CancelByCustomer)
 		}
 
 		// 受 JWT 保護：司機操作（driver_id 取自 token，不信任 body）

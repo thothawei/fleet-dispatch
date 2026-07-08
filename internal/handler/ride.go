@@ -36,6 +36,18 @@ func statusForErr(err error) int {
 	return http.StatusConflict
 }
 
+// readStatusForErr 乘客查詢/取消類錯誤對應 HTTP 狀態碼：無權限回 403、找不到回 404、其餘回 500
+func readStatusForErr(err error) int {
+	switch {
+	case errors.Is(err, service.ErrForbidden):
+		return http.StatusForbidden
+	case errors.Is(err, service.ErrNotFound):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
 // Accept POST /api/rides/:id/accept（需 JWT，driver_id 取自 token）
 func (h *RideHandler) Accept(c *gin.Context) {
 	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -127,4 +139,49 @@ func createStatusForErr(err error) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+// ActiveByCustomer GET /api/customer/rides/active — 乘客當前進行中訂單（App 啟動/重連取 ride_id 用）
+// 無進行中訂單時回 {"ride": null}，非錯誤。
+func (h *RideHandler) ActiveByCustomer(c *gin.Context) {
+	customerID := middleware.CustomerIDFromCtx(c)
+	ride, err := h.rides.GetActiveRideByCustomer(customerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ride": ride})
+}
+
+// GetByCustomer GET /api/customer/rides/:id — 乘客查自己單一訂單狀態/司機/ETA，非本人訂單回 403/404
+func (h *RideHandler) GetByCustomer(c *gin.Context) {
+	rideID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	customerID := middleware.CustomerIDFromCtx(c)
+	ride, err := h.rides.GetRideForCustomer(customerID, rideID)
+	if err != nil {
+		c.JSON(readStatusForErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ride": ride})
+}
+
+// CancelByCustomer POST /api/rides/:id/cancel-by-customer — 乘客 App 端取消，
+// 複用 DispatchService 的取消核心，釋放搶單鎖、司機回待命、通知雙方。
+func (h *RideHandler) CancelByCustomer(c *gin.Context) {
+	rideID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	customerID := middleware.CustomerIDFromCtx(c)
+	msg, err := h.dispatch.CancelByCustomerID(c.Request.Context(), customerID, rideID)
+	if err != nil {
+		c.JSON(readStatusForErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
