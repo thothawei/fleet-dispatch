@@ -148,19 +148,19 @@ WS 事件（乘客訂閱）：`ride.accepted`（`driver_name`/`eta_sec`）、`dr
 
 ---
 
-## Slice 6：完成後評分／付款入口 — [ ] 未做（B5）
+## Slice 6：完成後評分／付款入口 — [~] 佔位完成／真實 API 待 Phase C（B5）
 
 **依賴**：後端 Phase C（計費／評分 API 尚未定義於 production 契約）。
 
 **做什麼**：行程 `completed` 後顯示「留下評分」／「查看費用」佔位或真實 API。
 
 **步驟**
-- [ ] 1. 與後端對齊評分／帳單 endpoint
-- [ ] 2. 完成態 UI（不可再取消；可回首頁）
-- [ ] 3. 單測
-- [ ] 4. commit
+- [x] 1. 完成態 UI 佔位（`CompletedRideSummary` + `_CompletedRideCard`；評分／費用按鈕 disabled；「再叫一輛」）
+- [ ] 2. 與後端對齊評分／帳單 endpoint 並接真 API
+- [x] 3. widget 測試（完成卡顯示與 dismiss）
+- [x] 4. commit（佔位）
 
-**驗收**：完成後有明確下一步，不停留在空白 active 卡。
+**驗收**：完成後有明確下一步，不沉默回到叫車表單；Phase C 後可點評分／付款。
 
 ---
 
