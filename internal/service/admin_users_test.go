@@ -128,6 +128,40 @@ func TestUpdate_不存在的id回ErrNotFound(t *testing.T) {
 	}
 }
 
+// TestUpdate_降級已停用的superadmin不誤觸發最後保護 回歸測試：
+// 一個「已停用」的 superadmin 本來就不計入啟用名額，把它降級成 viewer
+// 不會減少啟用中 superadmin 的數量，因此即使場上只剩一個「啟用中」的
+// superadmin，也不該被 ErrLastSuperadmin 擋下。
+func TestUpdate_降級已停用的superadmin不誤觸發最後保護(t *testing.T) {
+	svc, seedID := newAdminUsersWithSeed(t)
+	// 種第二個 superadmin 後先停用它 → 它成為「已停用的 superadmin」
+	second, err := svc.Create("second-admin", "pw123456", "superadmin")
+	if err != nil {
+		t.Fatalf("建立第二個 superadmin 失敗: %v", err)
+	}
+	inactive := false
+	if err := svc.Update(seedID, second.ID, nil, nil, &inactive); err != nil {
+		t.Fatalf("停用第二個 superadmin 應成功，得 %v", err)
+	}
+	// 此刻只剩 seed 一個啟用中 superadmin；把已停用的 second 降級成 viewer 應成功
+	viewer := "viewer"
+	if err := svc.Update(seedID, second.ID, &viewer, nil, nil); err != nil {
+		t.Fatalf("降級已停用的 superadmin 不該被最後保護擋下，得 %v", err)
+	}
+	list, err := svc.List()
+	if err != nil {
+		t.Fatalf("List 失敗: %v", err)
+	}
+	for _, a := range list {
+		if a.ID == second.ID && a.Role != "viewer" {
+			t.Fatalf("second 應已降級為 viewer，得 role=%s", a.Role)
+		}
+		if a.ID == seedID && (a.Role != "superadmin" || !a.IsActive) {
+			t.Fatalf("seed 應仍為啟用中 superadmin，得 role=%s active=%v", a.Role, a.IsActive)
+		}
+	}
+}
+
 // TestUpdate_並發降級停用不會造成零superadmin 驗證 write-skew 防護：
 // 種兩個 active superadmin，同時對其中一個「降級」、對另一個「停用」，
 // 靠 LockActiveSuperadmins 的 FOR UPDATE row lock 讓兩個交易序列化，

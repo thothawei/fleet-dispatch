@@ -63,7 +63,9 @@ func (s *AdminUsers) Update(actorID, targetID int64, newRole, newPassword *strin
 		}
 		demoting := newRole != nil && *newRole != string(auth.RoleSuperadmin) && target.Role == string(auth.RoleSuperadmin)
 		deactivating := active != nil && !*active && target.IsActive
-		if (demoting || deactivating) && target.Role == string(auth.RoleSuperadmin) {
+		// 僅當 target 目前「計入啟用 superadmin 名額」時（啟用中的 superadmin）才需檢查是否為最後一位；
+		// 降級／停用一個本來就已停用的 superadmin 不會減少啟用名額，不該誤觸發此保護。
+		if (demoting || deactivating) && target.Role == string(auth.RoleSuperadmin) && target.IsActive {
 			n, err := s.repo.LockActiveSuperadmins(tx)
 			if err != nil {
 				return err
