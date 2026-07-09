@@ -18,7 +18,7 @@ var _ = NewAdminHandler
 func TestAdminFleet_授權邊界(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/api/admin/fleet", middleware.AdminAuth("s"), func(c *gin.Context) {
+	r.GET("/api/admin/fleet", middleware.AdminAuth("s", func(id int64) (string, bool, error) { return "superadmin", true, nil }), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 

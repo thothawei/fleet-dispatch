@@ -204,7 +204,13 @@ func main() {
 		// 後台：登入公開，其餘受 admin JWT 保護
 		api.POST("/admin/login", adminHandler.Login)
 		adminG := api.Group("/admin")
-		adminG.Use(middleware.AdminAuth(cfg.JWTSecret))
+		adminG.Use(middleware.AdminAuth(cfg.JWTSecret, func(id int64) (string, bool, error) {
+			a, err := adminRepo.FindByID(id)
+			if err != nil {
+				return "", false, err
+			}
+			return a.Role, a.IsActive, nil
+		}))
 		{
 			adminG.GET("/fleet", adminHandler.Fleet)
 			adminG.GET("/drivers", adminHandler.Drivers)

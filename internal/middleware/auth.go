@@ -43,8 +43,14 @@ func DriverIDFromCtx(c *gin.Context) int64 {
 // CtxAdminID 存放經 JWT 驗證後的管理員 id
 const CtxAdminID = "admin_id"
 
-// AdminAuth 驗證 Bearer JWT 且角色為 admin；非 admin 回 403，無效 token 回 401
-func AdminAuth(secret string) gin.HandlerFunc {
+// CtxAdminRole 存放經 DB 查回的 admin 角色
+const CtxAdminRole = "admin_role"
+
+// AdminLookup 依 admin id 取回角色與啟用狀態（由 repository 注入）
+type AdminLookup func(id int64) (role string, active bool, err error)
+
+// AdminAuth 驗 Bearer JWT（role=admin）後查 DB 取角色/啟用狀態；停用回 403、查無回 401
+func AdminAuth(secret string, lookup AdminLookup) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
@@ -52,15 +58,21 @@ func AdminAuth(secret string) gin.HandlerFunc {
 			return
 		}
 		role, id, err := auth.ParseToken(strings.TrimPrefix(header, "Bearer "), secret)
-		if err != nil {
+		if err != nil || role != "admin" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token 無效或已過期"})
 			return
 		}
-		if role != "admin" {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要管理員權限"})
+		adminRole, active, err := lookup(id)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "帳號不存在"})
+			return
+		}
+		if !active {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "帳號已停用"})
 			return
 		}
 		c.Set(CtxAdminID, id)
+		c.Set(CtxAdminRole, adminRole)
 		c.Next()
 	}
 }
@@ -73,6 +85,28 @@ func AdminIDFromCtx(c *gin.Context) int64 {
 		}
 	}
 	return 0
+}
+
+// AdminRoleFromCtx 取出 AdminAuth 放入的角色
+func AdminRoleFromCtx(c *gin.Context) string {
+	if v, ok := c.Get(CtxAdminRole); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// RequireAdminRole 要求 context 內角色 rank >= min，否則 403
+func RequireAdminRole(min auth.AdminRole) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role, _ := auth.ParseAdminRole(AdminRoleFromCtx(c))
+		if !role.AtLeast(min) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "權限不足"})
+			return
+		}
+		c.Next()
+	}
 }
 
 // CtxCustomerID 存放經 JWT 驗證後的乘客 id
