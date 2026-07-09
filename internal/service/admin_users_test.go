@@ -118,3 +118,11 @@ func TestUpdate_停用非最後一個superadmin成功(t *testing.T) {
 		t.Fatalf("找不到 seed")
 	}
 }
+
+func TestUpdate_不存在的id回ErrNotFound(t *testing.T) {
+	svc, _ := newAdminUsersWithSeed(t)
+	role := "viewer"
+	if err := svc.Update(999999, 888888, &role, nil, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("不存在的 target 應回 ErrNotFound，得 %v", err)
+	}
+}

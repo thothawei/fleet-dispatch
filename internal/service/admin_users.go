@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -55,6 +56,9 @@ func (s *AdminUsers) Update(actorID, targetID int64, newRole, newPassword *strin
 	return s.repo.Tx(func(tx *gorm.DB) error {
 		var target model.Admin
 		if err := tx.First(&target, targetID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
 			return err
 		}
 		demoting := newRole != nil && *newRole != string(auth.RoleSuperadmin) && target.Role == string(auth.RoleSuperadmin)
