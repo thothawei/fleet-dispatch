@@ -58,13 +58,17 @@ func AdminAuth(secret string, lookup AdminLookup) gin.HandlerFunc {
 			return
 		}
 		role, id, err := auth.ParseToken(strings.TrimPrefix(header, "Bearer "), secret)
-		if err != nil || role != "admin" {
+		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token 無效或已過期"})
+			return
+		}
+		if role != "admin" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "需要管理員權限"})
 			return
 		}
 		adminRole, active, err := lookup(id)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "帳號不存在"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "無法驗證帳號"})
 			return
 		}
 		if !active {

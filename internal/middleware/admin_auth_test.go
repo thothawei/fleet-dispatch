@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -44,7 +45,7 @@ func TestAdminAuth_無token回401(t *testing.T) {
 	}
 }
 
-func TestAdminAuth_司機token被拒401(t *testing.T) {
+func TestAdminAuth_司機token被拒403(t *testing.T) {
 	secret := "s"
 	tok, _ := auth.GenerateToken("driver", 9, secret, time.Hour)
 	r := setupAdminRouter(secret)
@@ -52,9 +53,24 @@ func TestAdminAuth_司機token被拒401(t *testing.T) {
 	req, _ := http.NewRequest("GET", "/admin/ping", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	r.ServeHTTP(w, req)
-	// AdminAuth 將角色不符併入 token 無效判斷，避免洩漏「角色錯誤」與「token 無效」的差異
+	// 有效但非 admin 角色的 token 屬已驗證但無權限，應回 403 而非 401
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("預期 403，得到 %d", w.Code)
+	}
+}
+
+func Test查無帳號_AdminAuth回401(t *testing.T) {
+	secret := "s"
+	tok, _ := auth.GenerateToken("admin", 9, secret, time.Hour)
+	lookup := func(id int64) (string, bool, error) { return "", false, errors.New("db error") }
+	r := gin.New()
+	r.GET("/x", AdminAuth(secret, lookup), func(c *gin.Context) { c.Status(200) })
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("預期 401，得到 %d", w.Code)
+		t.Fatalf("lookup 錯誤應 401，得 %d", w.Code)
 	}
 }
 
