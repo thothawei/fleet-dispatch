@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"line-fleet-dispatch/internal/auth"
 	"line-fleet-dispatch/internal/config"
 	"line-fleet-dispatch/internal/database"
 	"line-fleet-dispatch/internal/events"
@@ -141,11 +142,12 @@ func main() {
 	if err := adminRegistry.EnsureSeed(context.Background(), cfg.AdminSeedUsername, cfg.AdminSeedPassword); err != nil {
 		log.Error().Err(err).Msg("建立種子管理員失敗")
 	}
+	adminUsers := service.NewAdminUsers(adminRepo)
 	adminHandler := handler.NewAdminHandler(
 		adminRegistry,
 		service.NewAdminOperations(driverRepo, dispatchService, redisStore, dispatchSettings),
 		dispatchSettings,
-		driverRepo, rideRepo, trackRepo, rideEventRepo, reportRepo, adminRepo, redisStore,
+		driverRepo, rideRepo, trackRepo, rideEventRepo, reportRepo, adminRepo, adminUsers, redisStore,
 		cfg.JWTSecret, cfg.JWTExpiryHours,
 	)
 
@@ -213,15 +215,33 @@ func main() {
 		}))
 		{
 			adminG.GET("/me", adminHandler.Me)
-			adminG.GET("/fleet", adminHandler.Fleet)
-			adminG.GET("/drivers", adminHandler.Drivers)
-			adminG.GET("/rides", adminHandler.Rides)
-			adminG.GET("/rides/:id", adminHandler.RideDetail)
-			adminG.GET("/reports/daily", adminHandler.DailyReport)
-			adminG.PATCH("/drivers/:id/status", adminHandler.PatchDriverStatus)
-			adminG.GET("/settings/dispatch", adminHandler.GetDispatchSettings)
-			adminG.PUT("/settings/dispatch", adminHandler.PutDispatchSettings)
-			adminG.POST("/rides/:id/cancel", adminHandler.CancelRide)
+			// viewer：唯讀
+			read := adminG.Group("")
+			read.Use(middleware.RequireAdminRole(auth.RoleViewer))
+			{
+				read.GET("/fleet", adminHandler.Fleet)
+				read.GET("/drivers", adminHandler.Drivers)
+				read.GET("/rides", adminHandler.Rides)
+				read.GET("/rides/:id", adminHandler.RideDetail)
+				read.GET("/reports/daily", adminHandler.DailyReport)
+				read.GET("/settings/dispatch", adminHandler.GetDispatchSettings)
+			}
+			// dispatcher：派單操作
+			ops := adminG.Group("")
+			ops.Use(middleware.RequireAdminRole(auth.RoleDispatcher))
+			{
+				ops.PATCH("/drivers/:id/status", adminHandler.PatchDriverStatus)
+				ops.PUT("/settings/dispatch", adminHandler.PutDispatchSettings)
+				ops.POST("/rides/:id/cancel", adminHandler.CancelRide)
+			}
+			// superadmin：帳號管理
+			sup := adminG.Group("/admins")
+			sup.Use(middleware.RequireAdminRole(auth.RoleSuperadmin))
+			{
+				sup.GET("", adminHandler.ListAdmins)
+				sup.POST("", adminHandler.CreateAdmin)
+				sup.PATCH("/:id", adminHandler.UpdateAdmin)
+			}
 		}
 	}
 

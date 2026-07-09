@@ -27,6 +27,7 @@ type AdminHandler struct {
 	rideEvents       *repository.RideEventRepository
 	reports          *repository.ReportRepository
 	adminRepo        *repository.AdminRepository
+	adminUsers       *service.AdminUsers
 	redis            *redisstore.Store
 	jwtSecret        string
 	jwtExpiryHours   int
@@ -42,6 +43,7 @@ func NewAdminHandler(
 	rideEvents *repository.RideEventRepository,
 	reports *repository.ReportRepository,
 	adminRepo *repository.AdminRepository,
+	adminUsers *service.AdminUsers,
 	redis *redisstore.Store,
 	jwtSecret string,
 	jwtExpiryHours int,
@@ -49,7 +51,8 @@ func NewAdminHandler(
 	return &AdminHandler{
 		admins: admins, adminOps: adminOps, dispatchSettings: dispatchSettings,
 		drivers: drivers, rides: rides, tracks: tracks, rideEvents: rideEvents,
-		reports: reports, adminRepo: adminRepo, redis: redis, jwtSecret: jwtSecret, jwtExpiryHours: jwtExpiryHours,
+		reports: reports, adminRepo: adminRepo, adminUsers: adminUsers,
+		redis: redis, jwtSecret: jwtSecret, jwtExpiryHours: jwtExpiryHours,
 	}
 }
 
@@ -252,4 +255,69 @@ func (h *AdminHandler) CancelRide(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": msg})
+}
+
+// ListAdmins GET /api/admin/admins
+func (h *AdminHandler) ListAdmins(c *gin.Context) {
+	list, err := h.adminUsers.List()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查詢失敗"})
+		return
+	}
+	out := make([]gin.H, 0, len(list))
+	for _, a := range list {
+		out = append(out, gin.H{"id": a.ID, "username": a.Username, "role": a.Role,
+			"is_active": a.IsActive, "created_at": a.CreatedAt})
+	}
+	c.JSON(http.StatusOK, gin.H{"admins": out})
+}
+
+// CreateAdmin POST /api/admin/admins
+func (h *AdminHandler) CreateAdmin(c *gin.Context) {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required,min=6"`
+		Role     string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	a, err := h.adminUsers.Create(req.Username, req.Password, req.Role)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "username": a.Username, "role": a.Role})
+}
+
+// UpdateAdmin PATCH /api/admin/admins/:id
+func (h *AdminHandler) UpdateAdmin(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 錯誤"})
+		return
+	}
+	var req struct {
+		Role     *string `json:"role"`
+		Password *string `json:"password"`
+		IsActive *bool   `json:"is_active"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	actorID := middleware.AdminIDFromCtx(c)
+	if err := h.adminUsers.Update(actorID, id, req.Role, req.Password, req.IsActive); err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "帳號不存在"})
+		case errors.Is(err, service.ErrSelfLockout), errors.Is(err, service.ErrLastSuperadmin), errors.Is(err, service.ErrBadRole):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新失敗"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

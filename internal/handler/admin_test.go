@@ -108,7 +108,7 @@ func TestAdminLogin_停用帳號擋登入(t *testing.T) {
 		"disabled": {ID: 1, Username: "disabled", PasswordHash: string(hash), Name: "停用管理員", Role: "operator", IsActive: false},
 	}}
 	admins := service.NewAdminRegistry(store)
-	h := NewAdminHandler(admins, nil, nil, nil, nil, nil, nil, nil, nil, nil, "s", 1)
+	h := NewAdminHandler(admins, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "s", 1)
 
 	r := gin.New()
 	r.POST("/api/admin/login", h.Login)
@@ -136,7 +136,7 @@ func TestAdminMe(t *testing.T) {
 		t.Fatalf("種子 admin 建立失敗: %v", err)
 	}
 
-	h := NewAdminHandler(nil, nil, nil, nil, nil, nil, nil, nil, adminRepo, nil, "s", 1)
+	h := NewAdminHandler(nil, nil, nil, nil, nil, nil, nil, nil, adminRepo, nil, nil, "s", 1)
 
 	r := gin.New()
 	r.GET("/api/admin/me", func(c *gin.Context) {
@@ -158,5 +158,97 @@ func TestAdminMe(t *testing.T) {
 	}
 	if body["role"] != "dispatcher" {
 		t.Fatalf("預期 role=dispatcher，得到 %v，body=%s", body["role"], w.Body.String())
+	}
+}
+
+// TestAdminRBACRoutes 驗證 /api/admin 路由分級：viewer 打 dispatcher 級端點應 403、
+// dispatcher 打 superadmin 級端點應 403、superadmin 可打任何分級端點。
+// 路由結構刻意鏡射 cmd/server/main.go 的 read/ops/sup 分組，lookup 依 admin id 回不同角色，
+// 不觸碰 DB（帳號管理 service 的資料正確性由整合測試涵蓋，這裡只驗證授權邊界）。
+func TestAdminRBACRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const secret = "s"
+
+	rolesByID := map[int64]struct {
+		role   string
+		active bool
+	}{
+		1: {"viewer", true},
+		2: {"dispatcher", true},
+		3: {"superadmin", true},
+		4: {"viewer", false},
+	}
+	lookup := func(id int64) (string, bool, error) {
+		r, ok := rolesByID[id]
+		if !ok {
+			return "", false, service.ErrNotFound
+		}
+		return r.role, r.active, nil
+	}
+
+	ok200 := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) }
+
+	r := gin.New()
+	adminG := r.Group("/api/admin")
+	adminG.Use(middleware.AdminAuth(secret, lookup))
+	{
+		adminG.GET("/me", ok200)
+
+		read := adminG.Group("")
+		read.Use(middleware.RequireAdminRole(auth.RoleViewer))
+		{
+			read.GET("/fleet", ok200)
+		}
+
+		ops := adminG.Group("")
+		ops.Use(middleware.RequireAdminRole(auth.RoleDispatcher))
+		{
+			ops.PATCH("/drivers/:id/status", ok200)
+		}
+
+		sup := adminG.Group("/admins")
+		sup.Use(middleware.RequireAdminRole(auth.RoleSuperadmin))
+		{
+			sup.GET("", ok200)
+		}
+	}
+
+	tokenFor := func(id int64) string {
+		tok, err := auth.GenerateToken("admin", id, secret, time.Hour)
+		if err != nil {
+			t.Fatalf("產生 token 失敗: %v", err)
+		}
+		return tok
+	}
+
+	call := func(method, path string, adminID int64) int {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(method, path, nil)
+		req.Header.Set("Authorization", "Bearer "+tokenFor(adminID))
+		r.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	cases := []struct {
+		name     string
+		method   string
+		path     string
+		adminID  int64
+		wantCode int
+	}{
+		{"viewer 打唯讀端點應 200", http.MethodGet, "/api/admin/fleet", 1, http.StatusOK},
+		{"viewer 打 dispatcher 端點應 403", http.MethodPatch, "/api/admin/drivers/1/status", 1, http.StatusForbidden},
+		{"dispatcher 打 dispatcher 端點應 200", http.MethodPatch, "/api/admin/drivers/1/status", 2, http.StatusOK},
+		{"dispatcher 打 superadmin 端點應 403", http.MethodGet, "/api/admin/admins", 2, http.StatusForbidden},
+		{"superadmin 打 superadmin 端點應 200", http.MethodGet, "/api/admin/admins", 3, http.StatusOK},
+		{"superadmin 打唯讀端點也應 200（高階含低階權限）", http.MethodGet, "/api/admin/fleet", 3, http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := call(tc.method, tc.path, tc.adminID)
+			if got != tc.wantCode {
+				t.Fatalf("預期 %d，得到 %d", tc.wantCode, got)
+			}
+		})
 	}
 }
