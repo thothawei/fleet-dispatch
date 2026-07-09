@@ -1,0 +1,120 @@
+package service
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+
+	"line-fleet-dispatch/internal/model"
+	"line-fleet-dispatch/internal/repository"
+)
+
+// newAdminUsersWithRepo 起真 DB，回 service 與其 repo（供需直接操作 repo 的測試使用）
+// （newServiceTestDB 已含 t.Skipf 優雅跳過邏輯，見 testdb_test.go）
+func newAdminUsersWithRepo(t *testing.T) (*AdminUsers, *repository.AdminRepository) {
+	t.Helper()
+	db := newServiceTestDB(t)
+	repo := repository.NewAdminRepository(db)
+	return NewAdminUsers(repo), repo
+}
+
+// newAdminUsersWithSeed 起真 DB 並種一個 superadmin，回 service 與該 seed 的 id
+func newAdminUsersWithSeed(t *testing.T) (*AdminUsers, int64) {
+	t.Helper()
+	svc, repo := newAdminUsersWithRepo(t)
+	now := time.Now()
+	seed := &model.Admin{
+		Username: "root", PasswordHash: "x", Name: "系統管理員",
+		Role: "superadmin", IsActive: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.Create(seed); err != nil {
+		t.Fatalf("seed 失敗: %v", err)
+	}
+	return svc, seed.ID
+}
+
+func TestUpdate_不可降級最後一個superadmin(t *testing.T) {
+	svc, seedID := newAdminUsersWithSeed(t)
+	viewer := "viewer"
+	err := svc.Update(seedID, seedID, &viewer, nil, nil)
+	if !errors.Is(err, ErrSelfLockout) && !errors.Is(err, ErrLastSuperadmin) {
+		t.Fatalf("降級唯一 superadmin（且是自己）應被擋，得 %v", err)
+	}
+}
+
+func TestUpdate_不可停用最後一個superadmin(t *testing.T) {
+	svc, repo := newAdminUsersWithRepo(t)
+	now := time.Now()
+	seed := &model.Admin{
+		Username: "root", PasswordHash: "x", Name: "系統管理員",
+		Role: "superadmin", IsActive: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.Create(seed); err != nil {
+		t.Fatalf("seed 失敗: %v", err)
+	}
+	// 換一個不同的 actor，避免觸發「對自己」的鎖死擋法，專測「最後一個 superadmin」擋法
+	other := &model.Admin{
+		Username: "other", PasswordHash: "x", Name: "其他管理員",
+		Role: "viewer", IsActive: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.Create(other); err != nil {
+		t.Fatalf("建立 other 失敗: %v", err)
+	}
+	inactive := false
+	err := svc.Update(other.ID, seed.ID, nil, nil, &inactive)
+	if !errors.Is(err, ErrLastSuperadmin) {
+		t.Fatalf("停用最後一個 superadmin 應回 ErrLastSuperadmin，得 %v", err)
+	}
+}
+
+func TestCreate_壞role被拒(t *testing.T) {
+	svc, _ := newAdminUsersWithSeed(t)
+	if _, err := svc.Create("bob", "pw123456", "root"); !errors.Is(err, ErrBadRole) {
+		t.Fatalf("壞 role 應回 ErrBadRole，得 %v", err)
+	}
+}
+
+func TestCreate_成功(t *testing.T) {
+	svc, _ := newAdminUsersWithSeed(t)
+	a, err := svc.Create("bob", "pw123456", "viewer")
+	if err != nil {
+		t.Fatalf("建立失敗: %v", err)
+	}
+	if a.Username != "bob" || a.Role != "viewer" || !a.IsActive {
+		t.Fatalf("建立結果不符預期: %+v", a)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(a.PasswordHash), []byte("pw123456")) != nil {
+		t.Fatalf("密碼雜湊無法驗證")
+	}
+}
+
+func TestUpdate_停用非最後一個superadmin成功(t *testing.T) {
+	svc, seedID := newAdminUsersWithSeed(t)
+	// 種第二個 superadmin，seed 就不是「最後一個」了
+	second, err := svc.Create("second-admin", "pw123456", "superadmin")
+	if err != nil {
+		t.Fatalf("建立第二個 superadmin 失敗: %v", err)
+	}
+	inactive := false
+	if err := svc.Update(second.ID, seedID, nil, nil, &inactive); err != nil {
+		t.Fatalf("停用非最後一個 superadmin 應成功，得 %v", err)
+	}
+	list, err := svc.List()
+	if err != nil {
+		t.Fatalf("List 失敗: %v", err)
+	}
+	var found bool
+	for _, a := range list {
+		if a.ID == seedID {
+			found = true
+			if a.IsActive {
+				t.Fatalf("seed 應已被停用")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("找不到 seed")
+	}
+}

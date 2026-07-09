@@ -11,4 +11,7 @@ var (
 	ErrRateLimited        = errors.New("叫車太頻繁，請稍後再試")
 	ErrDriverOnTrip       = errors.New("行程進行中，無法下線")
 	ErrDriverDisabled     = errors.New("帳號已停用，無法上線")
+	ErrBadRole            = errors.New("角色無效")
+	ErrSelfLockout        = errors.New("不可對自己執行此操作")
+	ErrLastSuperadmin     = errors.New("不可移除最後一個 superadmin")
 )
