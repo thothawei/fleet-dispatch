@@ -285,7 +285,12 @@ func (h *AdminHandler) CreateAdmin(c *gin.Context) {
 	}
 	a, err := h.adminUsers.Create(req.Username, req.Password, req.Role)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if errors.Is(err, service.ErrBadRole) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// 避免把底層 Postgres 錯誤（如 unique violation 原始文字）洩漏給前端
+		c.JSON(http.StatusBadRequest, gin.H{"error": "建立失敗（帳號可能已存在）"})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"id": a.ID, "username": a.Username, "role": a.Role})

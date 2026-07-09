@@ -64,7 +64,7 @@ func (s *AdminUsers) Update(actorID, targetID int64, newRole, newPassword *strin
 		demoting := newRole != nil && *newRole != string(auth.RoleSuperadmin) && target.Role == string(auth.RoleSuperadmin)
 		deactivating := active != nil && !*active && target.IsActive
 		if (demoting || deactivating) && target.Role == string(auth.RoleSuperadmin) {
-			n, err := s.repo.CountActiveSuperadmins(tx)
+			n, err := s.repo.LockActiveSuperadmins(tx)
 			if err != nil {
 				return err
 			}

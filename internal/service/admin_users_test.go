@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -124,5 +125,58 @@ func TestUpdate_不存在的id回ErrNotFound(t *testing.T) {
 	role := "viewer"
 	if err := svc.Update(999999, 888888, &role, nil, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("不存在的 target 應回 ErrNotFound，得 %v", err)
+	}
+}
+
+// TestUpdate_並發降級停用不會造成零superadmin 驗證 write-skew 防護：
+// 種兩個 active superadmin，同時對其中一個「降級」、對另一個「停用」，
+// 靠 LockActiveSuperadmins 的 FOR UPDATE row lock 讓兩個交易序列化，
+// 使後執行者重讀到真實計數而擋下，最終至少留一個 active superadmin。
+func TestUpdate_並發降級停用不會造成零superadmin(t *testing.T) {
+	svc, repo := newAdminUsersWithRepo(t)
+	now := time.Now()
+	sa1 := &model.Admin{
+		Username: "sa1", PasswordHash: "x", Name: "sa1",
+		Role: "superadmin", IsActive: true, CreatedAt: now, UpdatedAt: now,
+	}
+	sa2 := &model.Admin{
+		Username: "sa2", PasswordHash: "x", Name: "sa2",
+		Role: "superadmin", IsActive: true, CreatedAt: now, UpdatedAt: now,
+	}
+	// 中立第三方 actor（非本次操作的兩個 superadmin 本人），避免觸發自我鎖死擋法
+	actor := &model.Admin{
+		Username: "actor", PasswordHash: "x", Name: "actor",
+		Role: "viewer", IsActive: true, CreatedAt: now, UpdatedAt: now,
+	}
+	for _, a := range []*model.Admin{sa1, sa2, actor} {
+		if err := repo.Create(a); err != nil {
+			t.Fatalf("seed 失敗: %v", err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	var err1, err2 error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		viewer := "viewer"
+		err1 = svc.Update(actor.ID, sa1.ID, &viewer, nil, nil) // T1：降級 sa1
+	}()
+	go func() {
+		defer wg.Done()
+		inactive := false
+		err2 = svc.Update(actor.ID, sa2.ID, nil, nil, &inactive) // T2：停用 sa2
+	}()
+	wg.Wait()
+
+	n, err := repo.CountActiveSuperadmins(nil)
+	if err != nil {
+		t.Fatalf("查詢 active superadmin 數失敗: %v", err)
+	}
+	if n < 1 {
+		t.Fatalf("並發降級/停用後 active superadmin 數應 >= 1，得 %d（err1=%v err2=%v）", n, err1, err2)
+	}
+	if !errors.Is(err1, ErrLastSuperadmin) && !errors.Is(err2, ErrLastSuperadmin) {
+		t.Fatalf("兩個並發操作中應至少一個回 ErrLastSuperadmin（序列化後偵測到只剩一個），得 err1=%v err2=%v", err1, err2)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/model"
@@ -570,6 +571,20 @@ func (r *AdminRepository) CountActiveSuperadmins(tx *gorm.DB) (int64, error) {
 	err := db.Model(&model.Admin{}).
 		Where("role = ? AND is_active = ?", "superadmin", true).Count(&n).Error
 	return n, err
+}
+
+// LockActiveSuperadmins 於交易內對 active superadmin 列加 FOR UPDATE row lock 並回其數量。
+// 讓並發的降級/停用交易序列化，避免 write-skew 造成零 superadmin。
+// Postgres 不能把 FOR UPDATE 直接套在聚合 COUNT 上，故改用 Find 鎖列後取切片長度。
+func (r *AdminRepository) LockActiveSuperadmins(tx *gorm.DB) (int64, error) {
+	if tx == nil {
+		return 0, errors.New("LockActiveSuperadmins 需在交易內呼叫")
+	}
+	var rows []model.Admin
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("role = ? AND is_active = ?", "superadmin", true).
+		Find(&rows).Error
+	return int64(len(rows)), err
 }
 
 // Tx 在交易內執行 fn
