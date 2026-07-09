@@ -145,7 +145,7 @@ func main() {
 		adminRegistry,
 		service.NewAdminOperations(driverRepo, dispatchService, redisStore, dispatchSettings),
 		dispatchSettings,
-		driverRepo, rideRepo, trackRepo, rideEventRepo, reportRepo, redisStore,
+		driverRepo, rideRepo, trackRepo, rideEventRepo, reportRepo, adminRepo, redisStore,
 		cfg.JWTSecret, cfg.JWTExpiryHours,
 	)
 
@@ -212,6 +212,7 @@ func main() {
 			return a.Role, a.IsActive, nil
 		}))
 		{
+			adminG.GET("/me", adminHandler.Me)
 			adminG.GET("/fleet", adminHandler.Fleet)
 			adminG.GET("/drivers", adminHandler.Drivers)
 			adminG.GET("/rides", adminHandler.Rides)

@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"line-fleet-dispatch/internal/auth"
+	"line-fleet-dispatch/internal/middleware"
 	"line-fleet-dispatch/internal/model"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
@@ -25,6 +26,7 @@ type AdminHandler struct {
 	tracks           *repository.TrackRepository
 	rideEvents       *repository.RideEventRepository
 	reports          *repository.ReportRepository
+	adminRepo        *repository.AdminRepository
 	redis            *redisstore.Store
 	jwtSecret        string
 	jwtExpiryHours   int
@@ -39,6 +41,7 @@ func NewAdminHandler(
 	tracks *repository.TrackRepository,
 	rideEvents *repository.RideEventRepository,
 	reports *repository.ReportRepository,
+	adminRepo *repository.AdminRepository,
 	redis *redisstore.Store,
 	jwtSecret string,
 	jwtExpiryHours int,
@@ -46,7 +49,7 @@ func NewAdminHandler(
 	return &AdminHandler{
 		admins: admins, adminOps: adminOps, dispatchSettings: dispatchSettings,
 		drivers: drivers, rides: rides, tracks: tracks, rideEvents: rideEvents,
-		reports: reports, redis: redis, jwtSecret: jwtSecret, jwtExpiryHours: jwtExpiryHours,
+		reports: reports, adminRepo: adminRepo, redis: redis, jwtSecret: jwtSecret, jwtExpiryHours: jwtExpiryHours,
 	}
 }
 
@@ -75,6 +78,17 @@ func (h *AdminHandler) Login(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"admin_id": admin.ID, "name": admin.Name, "role": admin.Role, "token": token})
+}
+
+// Me GET /api/admin/me：回登入者自己的身分與角色
+func (h *AdminHandler) Me(c *gin.Context) {
+	id := middleware.AdminIDFromCtx(c)
+	a, err := h.adminRepo.FindByID(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "帳號不存在"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": a.ID, "username": a.Username, "role": a.Role})
 }
 
 // Fleet GET /api/admin/fleet：即時在線司機座標快照

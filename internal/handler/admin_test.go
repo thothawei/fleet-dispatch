@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,13 +10,48 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"golang.org/x/crypto/bcrypt"
+	gormpostgres "gorm.io/driver/postgres"
+	"gorm.io/gorm"
 
 	"line-fleet-dispatch/internal/auth"
+	"line-fleet-dispatch/internal/database"
 	"line-fleet-dispatch/internal/middleware"
 	"line-fleet-dispatch/internal/model"
+	"line-fleet-dispatch/internal/repository"
 	"line-fleet-dispatch/internal/service"
 )
+
+// newMigratedTestDB 起真 PostGIS 容器並跑「全部 db/migrations」，得到與正式一致的完整 schema。
+// Docker 不可用時跳過。（沿用 internal/repository 既有的整合測試手法）
+func newMigratedTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	ctx := context.Background()
+	container, err := tcpostgres.Run(ctx, "postgis/postgis:16-3.4",
+		tcpostgres.WithDatabase("test"),
+		tcpostgres.WithUsername("test"),
+		tcpostgres.WithPassword("test"),
+		tcpostgres.BasicWaitStrategies(),
+	)
+	if err != nil {
+		t.Skipf("略過整合測試（Docker/testcontainers 不可用）: %v", err)
+	}
+	t.Cleanup(func() { _ = container.Terminate(ctx) })
+
+	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		t.Fatalf("取得連線字串失敗: %v", err)
+	}
+	if err := database.RunMigrations(connStr, "../../db/migrations"); err != nil {
+		t.Fatalf("跑 migration 失敗: %v", err)
+	}
+	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("連線失敗: %v", err)
+	}
+	return db
+}
 
 // fakeAdminStore 以記憶體模擬 AdminRepository（僅供 Login 測試使用）
 type fakeAdminStore struct {
@@ -72,7 +108,7 @@ func TestAdminLogin_停用帳號擋登入(t *testing.T) {
 		"disabled": {ID: 1, Username: "disabled", PasswordHash: string(hash), Name: "停用管理員", Role: "operator", IsActive: false},
 	}}
 	admins := service.NewAdminRegistry(store)
-	h := NewAdminHandler(admins, nil, nil, nil, nil, nil, nil, nil, nil, "s", 1)
+	h := NewAdminHandler(admins, nil, nil, nil, nil, nil, nil, nil, nil, nil, "s", 1)
 
 	r := gin.New()
 	r.POST("/api/admin/login", h.Login)
@@ -85,5 +121,42 @@ func TestAdminLogin_停用帳號擋登入(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("停用帳號應回 403，得到 %d，body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestAdminMe(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := newMigratedTestDB(t)
+	adminRepo := repository.NewAdminRepository(db)
+
+	now := time.Now()
+	seed := &model.Admin{Username: "ops1", PasswordHash: "hash", Name: "值班", Role: "dispatcher", IsActive: true, CreatedAt: now, UpdatedAt: now}
+	if err := adminRepo.Create(seed); err != nil {
+		t.Fatalf("種子 admin 建立失敗: %v", err)
+	}
+
+	h := NewAdminHandler(nil, nil, nil, nil, nil, nil, nil, nil, adminRepo, nil, "s", 1)
+
+	r := gin.New()
+	r.GET("/api/admin/me", func(c *gin.Context) {
+		c.Set(middleware.CtxAdminID, seed.ID)
+		c.Set(middleware.CtxAdminRole, seed.Role)
+		c.Next()
+	}, h.Me)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/admin/me", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("預期 200，得到 %d，body=%s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("回應非合法 JSON: %v", err)
+	}
+	if body["role"] != "dispatcher" {
+		t.Fatalf("預期 role=dispatcher，得到 %v，body=%s", body["role"], w.Body.String())
 	}
 }
