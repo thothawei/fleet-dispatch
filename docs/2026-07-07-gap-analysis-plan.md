@@ -104,7 +104,7 @@
   service 於狀態轉換寫入審計；admin `RideDetail` 回傳 `events` 時間序列。
   - 驗收：跑一趟後，`ride_events`／admin 詳情有派單→接單→上車→完成的完整時間序列。
 - [x] **D5. App 直接下單端點 `POST /api/rides`**：✅ 2026-07-07 完成（commit 4f2ec93/845f16d，`RideService.CreateByCustomer` 含進行中訂單守門）。P0 #2/#3/#4 同批完成。
-- [ ] **D6. RBAC 多角色**：目前單一 admin = 全權限。若要多後台使用者/權限分級再做（優先度低）。
+- [x] **D6. RBAC 多角色**：✅ 2026-07-09。三層 viewer/dispatcher/superadmin（migration `000010`）、`AdminAuth` 查 DB（停用即時生效）+ `RequireAdminRole`、帳號管理 API（防鎖死 FOR UPDATE 交易）+ `/api/admin/me`、前端守衛與使用者管理頁。詳見 STATUS.md #9。
 - [ ] **D7. Phase C 產品功能**（依商業需求）：C1 計費（PostGIS 里程 + 費率表）、C2 評分、C3 金流（你本業最熟）、C4 Prometheus `/metrics`。
 
 ---

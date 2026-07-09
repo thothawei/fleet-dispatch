@@ -58,7 +58,11 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 6. ~~**後台寫入（後端 P2 + 前端 C2/C3）**~~：✅ 後端 API 2026-07-08；前端（line-fleet-admin）司機啟停、派單參數、強制取消亦已完成。**D4 前端**：✅ 訂單詳情「狀態時間軸」顯示 `events`（2026-07-08）。
 7. **品質**：admin 測試／C5 視覺驗證已在 admin repo 完成；~~A4 M6 計畫勾選~~ ✅。本機 Go 整合測試需完整 Xcode（CGO stdlib.h）或 Docker PostGIS。
 8. **DevOps**：~~E2 App CI~~ ✅；~~E2 admin CI~~ ✅；~~E2 後端 CI~~ ✅ 2026-07-08（`.github/workflows/go-ci.yml`：build + 單元測）。仍待：E3 生產部署、E4 監控。
-9. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D6 RBAC 多角色；D7 Phase C 計費/評分/金流/metrics。Maps API key／真 FCM 屬外部依賴。
+9. ~~**D6 RBAC 多角色**~~：✅ 2026-07-09（spec [2026-07-09-d6-rbac-design.md](superpowers/specs/2026-07-09-d6-rbac-design.md)／計畫 [2026-07-09-d6-rbac.md](superpowers/plans/2026-07-09-d6-rbac.md)）。
+   三層角色 viewer/dispatcher/superadmin（migration `000010` 加 `role`/`is_active` + CHECK）；`AdminAuth` 改查 DB（停用即時生效）+ `RequireAdminRole` 分級；
+   帳號管理 API `/api/admin/admins`（superadmin，防鎖死 **FOR UPDATE** 交易）+ `/api/admin/me`；前端（line-fleet-admin）bootstrap 補 role、路由守衛、使用者管理頁、viewer 寫入降級。
+   端到端 curl 驗證分級/停用即時失效/防自我鎖死全通過。
+10. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D7 Phase C 計費/評分/金流/metrics。Maps API key／真 FCM 屬外部依賴。
 
 ## 環境備忘
 - Flutter/Android 環境變數在 `~/.zshrc`（JAVA_HOME→openjdk@17、ANDROID_HOME、PATH）。Bash 工具跨回合 cwd 會重設，跑 flutter/adb 前自行 export。
