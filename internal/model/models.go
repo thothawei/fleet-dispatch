@@ -156,6 +156,8 @@ type Admin struct {
 	Username     string    `gorm:"column:username;uniqueIndex;not null"`
 	PasswordHash string    `gorm:"column:password_hash;not null;default:''" json:"-"`
 	Name         string    `gorm:"not null;default:''"`
+	Role         string    `gorm:"column:role;not null;default:'superadmin'"`
+	IsActive     bool      `gorm:"column:is_active;not null;default:true"`
 	CreatedAt    time.Time `gorm:"not null"`
 	UpdatedAt    time.Time `gorm:"not null"`
 }
