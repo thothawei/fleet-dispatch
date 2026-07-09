@@ -58,3 +58,18 @@ func Test既有Admin_migration後為superadmin且啟用(t *testing.T) {
 		t.Fatalf("既有 admin 應為 superadmin 且啟用，得 role=%q active=%v", got.Role, got.IsActive)
 	}
 }
+
+func TestAdminRepo_FindByID與ListAll(t *testing.T) {
+	db := newMigratedTestDB(t)
+	repo := NewAdminRepository(db)
+
+	_ = repo.Create(&model.Admin{Username: "a1", Role: "viewer", IsActive: true})
+	list, err := repo.ListAll()
+	if err != nil || len(list) == 0 {
+		t.Fatalf("ListAll 失敗: %v len=%d", err, len(list))
+	}
+	got, err := repo.FindByID(list[0].ID)
+	if err != nil || got.Username != list[0].Username {
+		t.Fatalf("FindByID 失敗: %v", err)
+	}
+}

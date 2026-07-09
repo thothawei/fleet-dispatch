@@ -541,3 +541,38 @@ func (r *AdminRepository) CountAll() (int64, error) {
 	err := r.db.Model(&model.Admin{}).Count(&n).Error
 	return n, err
 }
+
+func (r *AdminRepository) FindByID(id int64) (*model.Admin, error) {
+	var a model.Admin
+	if err := r.db.First(&a, id).Error; err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (r *AdminRepository) ListAll() ([]model.Admin, error) {
+	var list []model.Admin
+	err := r.db.Order("id asc").Find(&list).Error
+	return list, err
+}
+
+func (r *AdminRepository) UpdateAdmin(a *model.Admin) error {
+	return r.db.Model(a).Select("Role", "PasswordHash", "IsActive", "UpdatedAt").Updates(a).Error
+}
+
+// CountActiveSuperadmins 可帶交易 handle；tx 為 nil 時用預設 db
+func (r *AdminRepository) CountActiveSuperadmins(tx *gorm.DB) (int64, error) {
+	db := r.db
+	if tx != nil {
+		db = tx
+	}
+	var n int64
+	err := db.Model(&model.Admin{}).
+		Where("role = ? AND is_active = ?", "superadmin", true).Count(&n).Error
+	return n, err
+}
+
+// Tx 在交易內執行 fn
+func (r *AdminRepository) Tx(fn func(*gorm.DB) error) error {
+	return r.db.Transaction(fn)
+}
