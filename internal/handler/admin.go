@@ -65,12 +65,16 @@ func (h *AdminHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return
 	}
+	if !admin.IsActive {
+		c.JSON(http.StatusForbidden, gin.H{"error": "帳號已停用"})
+		return
+	}
 	token, err := auth.GenerateToken("admin", admin.ID, h.jwtSecret, time.Duration(h.jwtExpiryHours)*time.Hour)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "簽發 token 失敗"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"admin_id": admin.ID, "name": admin.Name, "token": token})
+	c.JSON(http.StatusOK, gin.H{"admin_id": admin.ID, "name": admin.Name, "role": admin.Role, "token": token})
 }
 
 // Fleet GET /api/admin/fleet：即時在線司機座標快照

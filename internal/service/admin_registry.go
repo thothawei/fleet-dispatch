@@ -59,6 +59,8 @@ func (s *AdminRegistry) EnsureSeed(ctx context.Context, username, password strin
 		Username:     username,
 		PasswordHash: string(hash),
 		Name:         "系統管理員",
+		Role:         "superadmin",
+		IsActive:     true,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	})

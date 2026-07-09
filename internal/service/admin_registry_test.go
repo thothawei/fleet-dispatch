@@ -68,3 +68,13 @@ func TestAdminRegistry_種子與登入(t *testing.T) {
 		t.Fatal("錯誤密碼應登入失敗")
 	}
 }
+
+func TestEnsureSeed_角色為superadmin(t *testing.T) {
+	store := newFakeAdminStore()
+	reg := NewAdminRegistry(store)
+	_ = reg.EnsureSeed(context.Background(), "admin", "s3cret")
+	a, _ := store.FindByUsername("admin")
+	if a.Role != "superadmin" || !a.IsActive {
+		t.Fatalf("種子應為 superadmin 且啟用，得 role=%q active=%v", a.Role, a.IsActive)
+	}
+}
