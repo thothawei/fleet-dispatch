@@ -73,3 +73,32 @@ func TestAdminRepo_FindByID與ListAll(t *testing.T) {
 		t.Fatalf("FindByID 失敗: %v", err)
 	}
 }
+
+func TestAdminRepo_UpdateAdmin_停用持久化且不動Username(t *testing.T) {
+	db := newMigratedTestDB(t)
+	repo := NewAdminRepository(db)
+	now := time.Now()
+	a := &model.Admin{Username: "op-x", PasswordHash: "h", Name: "值班", Role: "dispatcher", IsActive: true, CreatedAt: now, UpdatedAt: now}
+	if err := repo.Create(a); err != nil {
+		t.Fatalf("Create 失敗: %v", err)
+	}
+	// 停用（IsActive=false 為零值，需確認有寫入）並改角色
+	a.IsActive = false
+	a.Role = "viewer"
+	if err := repo.UpdateAdmin(a); err != nil {
+		t.Fatalf("UpdateAdmin 失敗: %v", err)
+	}
+	got, err := repo.FindByID(a.ID)
+	if err != nil {
+		t.Fatalf("FindByID 失敗: %v", err)
+	}
+	if got.IsActive {
+		t.Fatal("IsActive=false 應被持久化，卻仍為 true（GORM 零值被略過）")
+	}
+	if got.Role != "viewer" {
+		t.Fatalf("Role 應更新為 viewer，得 %q", got.Role)
+	}
+	if got.Username != "op-x" {
+		t.Fatalf("Username 不應被 UpdateAdmin 動到，得 %q", got.Username)
+	}
+}
