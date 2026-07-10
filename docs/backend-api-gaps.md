@@ -128,6 +128,12 @@
   → P4 Phase C 依商業需求
 ```
 
+## 新增缺口（2026-07-10 由後台前端反推）
+
+| 編號 | 端點 | 缺什麼 | 為何需要 |
+|---|---|---|---|
+| #15 | `GET /api/admin/rides` | `offset`、`from`/`to`（依 `requested_at`）、`q`（上車點／訂單 ID） | 現況 `RideRepository.ListRecent(status, limit)`（`internal/repository/repository.go:505`）只吃 status + limit。後台只能抓最近 100 筆再於前端過濾，訂單一多就看不到舊單。回應建議一併帶 `total` 供分頁器顯示。 |
+
 ## 落地備忘
 
 - 全部沿用既有 `Handler → Service → Repository` 分層；下單/取消優先包裝既有 service，不重寫派單。

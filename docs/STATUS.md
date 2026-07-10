@@ -77,8 +77,13 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 2. **座標導航 E2E**：`docker compose up` 後跑 `scripts/smoke_test.sh`，確認 pickup 回應含 `dropoff_lat/lng`；
    再配 App 模擬器驗司機端「導航去目的地」開出的是座標而非地址。
 3. **E3 生產部署 / E4 監控**（尚未開始，DevOps 剩下的兩項）。
-4. **後台前端剩餘小項**（line-fleet-admin）：Token 過期處理、訂單分頁／日期篩選／關鍵字搜尋、
-   匯出 CSV、全域 Error Boundary、README 版本校正（文件寫 antd v5/React 18，實際 v6/19）。
+4. ~~**後台前端剩餘小項**（line-fleet-admin）~~：✅ 2026-07-10。Token 過期處理（JWT `exp`）、
+   日期篩選／關鍵字搜尋、匯出 CSV、全域 Error Boundary、README 版本校正皆完成；
+   lint + tsc + 76 tests + build 全綠，另跑 Playwright 對真後端做 15 項真瀏覽器驗收。
+5. **後端補訂單查詢 API**（新缺口，擋住後台真分頁）：`RideRepository.ListRecent(status, limit)`
+   （`internal/repository/repository.go:505`）只吃 status + limit，沒有 offset／日期區間／關鍵字。
+   後台目前只能在「已載入的最近 100 筆」內做 client-side 過濾（頁面已明文標示這個限制）。
+   要做真分頁需替 `GET /api/admin/rides` 加上 `offset`、`from`/`to`、`q` 參數。
 
 ## 環境備忘
 - Flutter/Android 環境變數在 `~/.zshrc`（JAVA_HOME→openjdk@17、ANDROID_HOME、PATH）。Bash 工具跨回合 cwd 會重設，跑 flutter/adb 前自行 export。
