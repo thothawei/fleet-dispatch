@@ -48,4 +48,4 @@ jobs:
             ./internal/notify/ \
             ./internal/util/
           CGO_ENABLED=0 go test -count=1 -timeout 60s ./internal/service/ \
-            -run 'TestRideAuditor_|TestStatusPtrHelpers|TestEventTypeConstants_|TestDeviceTokenService_|TestValidatePickup|TestValidateOptional|TestRideAssignedPayload_|TestFormatETA|TestDispatcher_'
+            -run 'TestRideAuditor_|TestStatusPtrHelpers|TestEventTypeConstants_|TestDeviceTokenService_|TestValidatePickup|TestValidateOptional|TestRideAssignedPayload_|TestRideAcceptedDriverPayload_|TestFormatETA|TestDispatcher_'

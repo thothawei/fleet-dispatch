@@ -64,14 +64,18 @@ func (h *RideHandler) Accept(c *gin.Context) {
 func (h *RideHandler) PickUp(c *gin.Context) {
 	rideID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
 	driverID := middleware.DriverIDFromCtx(c)
-	dropoff, err := h.tracking.PickUp(c.Request.Context(), rideID, driverID)
+	result, err := h.tracking.PickUp(c.Request.Context(), rideID, driverID)
 	if err != nil {
 		c.JSON(statusForErr(err), gin.H{"error": err.Error()})
 		return
 	}
 	resp := gin.H{"ok": true}
-	if dropoff != "" {
-		resp["dropoff_address"] = dropoff
+	if result.DropoffAddress != "" {
+		resp["dropoff_address"] = result.DropoffAddress
+	}
+	if result.HasDropoffPoint {
+		resp["dropoff_lat"] = result.DropoffLat
+		resp["dropoff_lng"] = result.DropoffLng
 	}
 	c.JSON(http.StatusOK, resp)
 }

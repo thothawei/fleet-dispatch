@@ -67,3 +67,21 @@
 - **前向相容 LINE Login**：身分鍵仍是 line_user_id；日後接 LINE Login 只換驗證方式，
   不動身分模型（此為設計 §12.4「可改決策」的踏腳石實作）。
 - **測試**：CustomerRegistry 用假 store 做純邏輯單元測試；repo 層用 newMigratedTestDB。
+
+## 2026-07-10 · dropoff 座標鏈路修復（P1 尾巴）
+
+- **踩坑：commit message 不等於 diff**。`21e031d` 的訊息列了 5 項改動（RideService/RideRepository 參數、
+  派單事件、單元＋整合＋煙霧測試），但實際只提交了 `line_webhook.go` 與 `ride_dropoff_test.go`。
+  `service.RideRequest` 從未新增 `DropoffLat/Lng/Address`，於是 **main 從 21e031d 起連續三個 commit `go build ./...` 失敗**，
+  而且壞的版本已推上 origin。`ride_dropoff_test.go` 對著不存在的 API 撰寫（`NewDispatchService` 11 參數、
+  `CreateByCustomer` 位置參數版），從未編譯過——「測試已通過」的宣稱是假的。
+  go-ci 其實兩次都轉紅（run `29082655288`／`29082686314`），但被無視、照樣 push。
+  → **教訓：commit 前必跑 `go build ./... && go vet ./internal/...`；聲稱跑過的測試要貼實際輸出。
+  CI 抓得到不代表擋得住——main 需要 branch protection。**
+- **LINE 叫車不塞預設目的地**：webhook 只收得到位置訊息（＝上車點），流程中沒有目的地輸入來源。
+  `21e031d` 硬編「台北 101」當預設 dropoff，會讓每張 LINE 訂單的司機上車後導航到 101。已移除；
+  LINE 訂單 dropoff 維持 NULL（設計取捨），帶目的地的訂單來自乘客 App 的 `POST /api/rides`。
+- **座標優先於地址**：`PickUp` 改回傳 `PickUpResult{DropoffAddress, DropoffLat/Lng, HasDropoffPoint}`，
+  `ride.assigned` / `ride.accepted` 共用 `putDropoff()` 帶同一組欄位。地址字串在 Google Maps 上可能解析到
+  同名的錯誤地點，`dropoff_point` 才是原始資料；司機端有座標時一律用座標導航。
+- **`HasDropoffPoint` 而非零值判斷**：(0,0) 是合法座標，不能拿零值當「未指定」。

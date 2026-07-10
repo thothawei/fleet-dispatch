@@ -25,7 +25,8 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 - **P0 乘客 App 端點（2026-07-07）**：`POST /api/rides` 下單、`GET /api/customer/rides/active`、`GET /api/customer/rides/:id`、`POST /api/rides/:id/cancel-by-customer`。
 - **P1 司機 App 端點（2026-07-08）**：`/api/driver/me`、online/offline、`/api/driver/rides/active`、decline。
 - **安全 + 資料層（2026-07-08）**：`/track` 補 MultiAuth；公開 `/api/reports/daily` 下架；`GeoPoint.Scan` 修復；`Ride`/`GeoPoint` JSON tag。
-- **dropoff 鏈路（2026-07-08）**：App 下單寫入 `dropoff_address/lat/lng`；`rides/active` 回傳 dropoff；`ride.accepted` / **`ride.assigned`** WS 事件帶 dropoff；pickup 回應帶 `dropoff_address`。
+- **dropoff 鏈路（2026-07-08；2026-07-10 補齊座標）**：App 下單寫入 `dropoff_address/lat/lng`；`rides/active` 回傳 dropoff；
+  `ride.assigned`／`ride.accepted` WS 事件與 **pickup 回應**皆帶 `dropoff_address` + `dropoff_lat/lng`，司機端改以座標導航（地址僅供顯示與退路）。
 - **P2 後台寫入 API（2026-07-08）**：司機啟停、派單參數 GET/PUT、後台強制取消。
 - **smoke_test.sh 同步（2026-07-08）**：track 帶司機 JWT、日報改 admin JWT；對齊 M5 安全改動。
 
@@ -53,7 +54,12 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 2. ~~**A1 司機背景定位**~~：✅ 已實作（2026-07-08，line-fleet-app）。`getPositionStream` + Android 前景服務通知；**待真機驗收**鎖屏 10 分鐘後座標仍更新。
 3. ~~**A2/D1 FCM 推播（後端）**~~：✅ 2026-07-08 D1 契約落地——`device_tokens` migration、`Notifier` stub（LogPusher）、
    `POST/DELETE /api/{driver,customer}/device-token`、派單時並發 App 推播。**真 FCM/APNs 與 App A2 註冊 token 仍待** Firebase／真裝置。
-4. ~~**P1 小尾巴**~~：✅ 已完成（2026-07-08）。`ride.assigned` 事件已帶 `dropoff_address/lat/lng`；司機接單前可預覽目的地。LINE 叫車仍無目的地（設計取捨）。
+4. ~~**P1 小尾巴**~~：✅ 已完成（2026-07-08 事件層；**2026-07-10 修復並補完**）。`ride.assigned`／`ride.accepted` 事件與 pickup 回應皆帶
+   `dropoff_address/lat/lng`；司機接單前可預覽目的地，上車後以座標導航。
+   ⚠️ 2026-07-10 修：commit `21e031d` 宣稱「RideService/RideRepository 新增 dropoff 參數」，但實際只提交了 `line_webhook.go` 與一個
+   從未編譯過的測試檔，導致 **main 連續三個 commit 編譯失敗**（`service.RideRequest` 沒有 `DropoffLat/Lng/Address` 欄位）。
+   已移除該測試檔，並拿掉 webhook 中硬編的「台北 101」預設目的地——**LINE 流程只有位置訊息（上車點），沒有目的地輸入來源**，
+   硬塞預設值會讓每張 LINE 訂單的司機上車後導航到 101。LINE 叫車無目的地維持設計取捨。
 5. ~~**D4 `ride_events` 審計表**~~：✅ 2026-07-08。migration `000009`、狀態轉換寫入（叫車/派單/接單/抵達/上車/完成/取消/重派）、`GET /api/admin/rides/:id` 回傳 `events`。
 6. ~~**後台寫入（後端 P2 + 前端 C2/C3）**~~：✅ 後端 API 2026-07-08；前端（line-fleet-admin）司機啟停、派單參數、強制取消亦已完成。**D4 前端**：✅ 訂單詳情「狀態時間軸」顯示 `events`（2026-07-08）。
 7. **品質**：admin 測試／C5 視覺驗證已在 admin repo 完成；~~A4 M6 計畫勾選~~ ✅。本機 Go 整合測試需完整 Xcode（CGO stdlib.h）或 Docker PostGIS。
@@ -63,6 +69,16 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
    帳號管理 API `/api/admin/admins`（superadmin，防鎖死 **FOR UPDATE** 交易）+ `/api/admin/me`；前端（line-fleet-admin）bootstrap 補 role、路由守衛、使用者管理頁、viewer 寫入降級。
    端到端 curl 驗證分級/停用即時失效/防自我鎖死全通過。
 10. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D7 Phase C 計費/評分/金流/metrics。Maps API key／真 FCM 屬外部依賴。
+
+## 下次任務
+
+1. **開 main 分支保護**：go-ci **有**在 `21e031d` 與後續 docs commit 兩次轉紅（run 29082655288／29082686314），
+   但被無視、照樣推。CI 抓得到不代表擋得住——需要 GitHub branch protection 要求 go-ci 綠燈才能 push/merge。
+2. **座標導航 E2E**：`docker compose up` 後跑 `scripts/smoke_test.sh`，確認 pickup 回應含 `dropoff_lat/lng`；
+   再配 App 模擬器驗司機端「導航去目的地」開出的是座標而非地址。
+3. **E3 生產部署 / E4 監控**（尚未開始，DevOps 剩下的兩項）。
+4. **後台前端剩餘小項**（line-fleet-admin）：Token 過期處理、訂單分頁／日期篩選／關鍵字搜尋、
+   匯出 CSV、全域 Error Boundary、README 版本校正（文件寫 antd v5/React 18，實際 v6/19）。
 
 ## 環境備忘
 - Flutter/Android 環境變數在 `~/.zshrc`（JAVA_HOME→openjdk@17、ANDROID_HOME、PATH）。Bash 工具跨回合 cwd 會重設，跑 flutter/adb 前自行 export。

@@ -148,13 +148,9 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 	return nil
 }
 
-// rideAssignedPayload 組裝 ride.assigned WS 事件 payload（含選填目的地）。
-func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM int) map[string]any {
-	payload := map[string]any{
-		"address": pickupAddress,
-		"eta_sec": etaSec,
-		"dist_m":  distM,
-	}
+// putDropoff 把訂單的選填目的地寫入 WS payload；未指定時不放任何鍵。
+// 座標是司機端導航的原始資料，地址僅供顯示，兩者都要帶。
+func putDropoff(payload map[string]any, ride *model.Ride) {
 	if ride.DropoffAddress != "" {
 		payload["dropoff_address"] = ride.DropoffAddress
 	}
@@ -162,6 +158,24 @@ func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM i
 		payload["dropoff_lat"] = ride.DropoffPoint.Lat
 		payload["dropoff_lng"] = ride.DropoffPoint.Lng
 	}
+}
+
+// rideAssignedPayload 組裝 ride.assigned WS 事件 payload（含選填目的地）。
+func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM int) map[string]any {
+	payload := map[string]any{
+		"address": pickupAddress,
+		"eta_sec": etaSec,
+		"dist_m":  distM,
+	}
+	putDropoff(payload, ride)
+	return payload
+}
+
+// rideAcceptedDriverPayload 組裝 ride.accepted 推給「司機端」的 payload；
+// 司機接單後直接拿到目的地，不必等 pickup 回應。
+func rideAcceptedDriverPayload(ride *model.Ride) map[string]any {
+	payload := map[string]any{}
+	putDropoff(payload, ride)
 	return payload
 }
 
@@ -403,14 +417,10 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		RideID:  rideID,
 		Payload: map[string]any{"driver_name": driver.Name, "eta_sec": etaSec},
 	})
-	driverPayload := map[string]any{}
-	if ride.DropoffAddress != "" {
-		driverPayload["dropoff_address"] = ride.DropoffAddress
-	}
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
 		Type:    events.TypeRideAccepted,
 		RideID:  rideID,
-		Payload: driverPayload,
+		Payload: rideAcceptedDriverPayload(ride),
 	})
 
 	return "接單成功", nil

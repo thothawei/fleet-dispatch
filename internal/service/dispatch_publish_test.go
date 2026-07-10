@@ -83,6 +83,28 @@ func TestRideAssignedPayload_無Dropoff時省略欄位(t *testing.T) {
 	}
 }
 
+func TestRideAcceptedDriverPayload_帶目的地座標(t *testing.T) {
+	lat, lng := 25.08, 121.57
+	ride := &model.Ride{
+		DropoffAddress: "松山機場",
+		DropoffPoint:   &model.GeoPoint{Lat: lat, Lng: lng},
+	}
+	payload := rideAcceptedDriverPayload(ride)
+	if payload["dropoff_address"] != "松山機場" {
+		t.Fatalf("dropoff_address 錯誤: %v", payload["dropoff_address"])
+	}
+	if payload["dropoff_lat"] != lat || payload["dropoff_lng"] != lng {
+		t.Fatalf("dropoff 座標錯誤: %v", payload)
+	}
+}
+
+func TestRideAcceptedDriverPayload_無Dropoff時為空(t *testing.T) {
+	payload := rideAcceptedDriverPayload(&model.Ride{})
+	if len(payload) != 0 {
+		t.Fatalf("無目的地時 payload 應為空: %v", payload)
+	}
+}
+
 func TestNotifyCustomerETA_發佈driverLocation給乘客(t *testing.T) {
 	fp := &fakePublisher{}
 	db := newServiceTestDB(t)

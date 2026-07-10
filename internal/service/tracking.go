@@ -175,18 +175,26 @@ func (s *TrackingService) checkGeofence(ctx context.Context, ride *model.Ride, l
 	})
 }
 
-// PickUp 司機確認客戶上車；回傳目的地地址（未指定時為空字串）。
-func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) (string, error) {
+// PickUpResult 回給司機端上車後導航去目的地所需的資訊。
+// HasDropoffPoint 為 false 時代表該訂單未指定目的地座標（DropoffAddress 可能仍有值）。
+type PickUpResult struct {
+	DropoffAddress  string
+	DropoffLat      float64
+	DropoffLng      float64
+	HasDropoffPoint bool
+}
+
+// PickUp 司機確認客戶上車，回傳目的地資訊供司機端顯示「導航去目的地」。
+func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) (*PickUpResult, error) {
 	ride, err := s.rides.GetByID(rideID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if ride.DriverID == nil || *ride.DriverID != driverID {
-		return "", ErrForbidden
+		return nil, ErrForbidden
 	}
-	dropoff := ride.DropoffAddress
 	if err := s.rides.MarkPickedUp(rideID); err != nil {
-		return "", err
+		return nil, err
 	}
 	s.audit.record(rideID, statusPtr(constants.RideStatusAccepted), constants.RideStatusPickedUp,
 		events.TypeRidePickedUp, events.ActorDriver, idPtr(driverID), "")
@@ -198,7 +206,14 @@ func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) (s
 	if customerLineID != "" {
 		_ = s.line.PushText(ctx, customerLineID, "行程開始，祝您旅途愉快")
 	}
-	return dropoff, nil
+
+	res := &PickUpResult{DropoffAddress: ride.DropoffAddress}
+	if ride.DropoffPoint != nil {
+		res.DropoffLat = ride.DropoffPoint.Lat
+		res.DropoffLng = ride.DropoffPoint.Lng
+		res.HasDropoffPoint = true
+	}
+	return res, nil
 }
 
 // Complete 完成行程
