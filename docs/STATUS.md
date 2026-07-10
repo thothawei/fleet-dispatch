@@ -79,10 +79,11 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 4. ~~**後台前端剩餘小項**（line-fleet-admin）~~：✅ 2026-07-10。Token 過期處理（JWT `exp`）、
    日期篩選／關鍵字搜尋、匯出 CSV、全域 Error Boundary、README 版本校正皆完成；
    lint + tsc + 76 tests + build 全綠，另跑 Playwright 對真後端做 15 項真瀏覽器驗收。
-5. **後端補訂單查詢 API**（新缺口，擋住後台真分頁）：`RideRepository.ListRecent(status, limit)`
-   （`internal/repository/repository.go:505`）只吃 status + limit，沒有 offset／日期區間／關鍵字。
-   後台目前只能在「已載入的最近 100 筆」內做 client-side 過濾（頁面已明文標示這個限制）。
-   要做真分頁需替 `GET /api/admin/rides` 加上 `offset`、`from`/`to`、`q` 參數。
+5. ~~**後端補訂單查詢 API**~~：✅ 2026-07-10。`GET /api/admin/rides` 新增 `offset`、`from`/`to`
+   （依 `requested_at`，含頭尾）、`q`（上車點 `ILIKE` 或訂單 ID 子字串），回應加 `total`／`limit`／`offset`。
+   `RideRepository.List(RideListFilter)` 回 `(rows, total, err)`；`ListRecent` 保留為薄包裝。
+   契約詳見 [backend-api-gaps.md](backend-api-gaps.md) #15。
+   **仍待**：後台前端（line-fleet-admin）把 client-side 過濾改成伺服器端查詢＋分頁器。
 
 ## Git 工作流（2026-07-10 起）
 

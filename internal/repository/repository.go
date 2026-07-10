@@ -501,19 +501,68 @@ type AdminRideRow struct {
 	DistanceM     *int       `json:"distance_m"`
 }
 
-// ListRecent 後台訂單列表：可選 status 篩選，依 id 由新到舊取 limit 筆
-func (r *RideRepository) ListRecent(status *int16, limit int) ([]AdminRideRow, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 100
+const (
+	RideListDefaultLimit = 100
+	RideListMaxLimit     = 500
+)
+
+// RideListFilter 後台訂單列表的查詢條件；欄位為零值即不套用該條件。
+// From/To 是 YYYY-MM-DD，比對 requested_at 的日期（含頭尾），與 DailyDriverStats 的
+// `completed_at::date` 慣例一致。
+type RideListFilter struct {
+	Status *int16
+	From   string
+	To     string
+	Q      string // 上車點地址模糊比對，或訂單 ID 的子字串比對
+	Limit  int
+	Offset int
+}
+
+// applyRideListFilter 只組 WHERE，不含投影與排序——Count 與取列共用同一組條件。
+func (r *RideRepository) applyRideListFilter(f RideListFilter) *gorm.DB {
+	q := r.db.Model(&model.Ride{})
+	if f.Status != nil {
+		q = q.Where("status = ?", *f.Status)
 	}
-	q := r.db.Model(&model.Ride{}).
-		Select("id", "customer_id", "driver_id", "status", "pickup_address", "requested_at", "completed_at", "distance_m").
-		Order("id DESC").Limit(limit)
-	if status != nil {
-		q = q.Where("status = ?", *status)
+	if f.From != "" {
+		q = q.Where("requested_at::date >= ?::date", f.From)
 	}
+	if f.To != "" {
+		q = q.Where("requested_at::date <= ?::date", f.To)
+	}
+	if f.Q != "" {
+		like := "%" + f.Q + "%"
+		q = q.Where("(pickup_address ILIKE ? OR CAST(id AS TEXT) LIKE ?)", like, like)
+	}
+	return q
+}
+
+// List 後台訂單列表：依條件篩選，依 id 由新到舊分頁。
+// 第二個回傳值是符合條件的總筆數（不受 limit/offset 影響），供前端分頁器使用。
+func (r *RideRepository) List(f RideListFilter) ([]AdminRideRow, int64, error) {
+	if f.Limit <= 0 || f.Limit > RideListMaxLimit {
+		f.Limit = RideListDefaultLimit
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+
+	var total int64
+	if err := r.applyRideListFilter(f).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
 	var rows []AdminRideRow
-	err := q.Scan(&rows).Error
+	err := r.applyRideListFilter(f).
+		Select("id", "customer_id", "driver_id", "status", "pickup_address", "requested_at", "completed_at", "distance_m").
+		Order("id DESC").Limit(f.Limit).Offset(f.Offset).
+		Scan(&rows).Error
+	return rows, total, err
+}
+
+// ListRecent 取最近的訂單（不分頁）。保留給既有呼叫端。
+func (r *RideRepository) ListRecent(status *int16, limit int) ([]AdminRideRow, error) {
+	rows, _, err := r.List(RideListFilter{Status: status, Limit: limit})
 	return rows, err
 }
 
