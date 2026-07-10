@@ -130,9 +130,37 @@
 
 ## 新增缺口（2026-07-10 由後台前端反推）
 
-| 編號 | 端點 | 缺什麼 | 為何需要 |
+| 編號 | 端點 | 缺什麼 | 狀態 |
 |---|---|---|---|
-| #15 | `GET /api/admin/rides` | `offset`、`from`/`to`（依 `requested_at`）、`q`（上車點／訂單 ID） | 現況 `RideRepository.ListRecent(status, limit)`（`internal/repository/repository.go:505`）只吃 status + limit。後台只能抓最近 100 筆再於前端過濾，訂單一多就看不到舊單。回應建議一併帶 `total` 供分頁器顯示。 |
+| #15 | `GET /api/admin/rides` | `offset`、`from`/`to`（依 `requested_at`）、`q`（上車點／訂單 ID） | ✅ 2026-07-10 完成 |
+
+### #15 完成後的契約
+
+```
+GET /api/admin/rides?status=&limit=&offset=&from=&to=&q=
+```
+
+| 參數 | 型別 | 說明 |
+|---|---|---|
+| `status` | int16 | 訂單狀態；省略＝全部 |
+| `limit` | int | 1~500，預設 100；超出範圍回 400 |
+| `offset` | int | ≥0，預設 0 |
+| `from` / `to` | `YYYY-MM-DD` | 依 `requested_at` 的日期篩選，**含頭尾**；沿用 `DailyDriverStats` 的 `::date` 慣例。`from > to` 回 400 |
+| `q` | string | 上車點地址 `ILIKE` 模糊比對，或訂單 ID 的子字串比對；前後空白會去除 |
+
+回應：
+
+```json
+{ "rides": [...], "total": 42, "limit": 100, "offset": 0 }
+```
+
+- `total` 是**符合條件的總筆數**，不受 `limit`/`offset` 影響，供前端分頁器使用。
+- 空結果的 `rides` 是 `[]` 而非 `null`。
+- 排序固定為 `id DESC`（新到舊）。
+- 參數格式錯誤一律回 400 並帶中文 `error` 訊息（原本是靜默忽略）。
+
+實作：`RideRepository.List(RideListFilter)` 回 `(rows, total, err)`；`ListRecent` 保留為薄包裝供既有呼叫端使用。
+Query 解析抽成純函式 `parseRideListFilter(url.Values)`，故 CI 無 Docker 也測得到。
 
 ## 落地備忘
 

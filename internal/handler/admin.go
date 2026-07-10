@@ -2,8 +2,11 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -114,27 +117,95 @@ func (h *AdminHandler) Drivers(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"drivers": drivers})
 }
 
-// Rides GET /api/admin/rides?status=0&limit=100：訂單列表
+const rideListDateLayout = "2006-01-02"
+
+// parseRideListFilter 解析 /api/admin/rides 的 query string。
+// 抽成純函式（不吃 *gin.Context）以便單元測試，不必起 DB。
+func parseRideListFilter(q url.Values) (repository.RideListFilter, error) {
+	f := repository.RideListFilter{
+		Q:    strings.TrimSpace(q.Get("q")),
+		From: q.Get("from"),
+		To:   q.Get("to"),
+	}
+
+	if s := q.Get("status"); s != "" {
+		n, err := strconv.ParseInt(s, 10, 16)
+		if err != nil {
+			return f, fmt.Errorf("status 需為整數：%q", s)
+		}
+		v := int16(n)
+		f.Status = &v
+	}
+
+	if l := q.Get("limit"); l != "" {
+		n, err := strconv.Atoi(l)
+		if err != nil {
+			return f, fmt.Errorf("limit 需為整數：%q", l)
+		}
+		if n <= 0 || n > repository.RideListMaxLimit {
+			return f, fmt.Errorf("limit 需介於 1 與 %d 之間", repository.RideListMaxLimit)
+		}
+		f.Limit = n
+	}
+
+	if o := q.Get("offset"); o != "" {
+		n, err := strconv.Atoi(o)
+		if err != nil {
+			return f, fmt.Errorf("offset 需為整數：%q", o)
+		}
+		if n < 0 {
+			return f, fmt.Errorf("offset 不可為負數")
+		}
+		f.Offset = n
+	}
+
+	if f.From != "" {
+		if _, err := time.Parse(rideListDateLayout, f.From); err != nil {
+			return f, fmt.Errorf("from 需為 YYYY-MM-DD 格式：%q", f.From)
+		}
+	}
+	if f.To != "" {
+		if _, err := time.Parse(rideListDateLayout, f.To); err != nil {
+			return f, fmt.Errorf("to 需為 YYYY-MM-DD 格式：%q", f.To)
+		}
+	}
+	// 兩者都是 YYYY-MM-DD 定長格式，字串比較等同日期比較
+	if f.From != "" && f.To != "" && f.From > f.To {
+		return f, fmt.Errorf("from 不可晚於 to")
+	}
+
+	return f, nil
+}
+
+// Rides GET /api/admin/rides?status=0&limit=100&offset=0&from=2026-07-01&to=2026-07-10&q=台北
+// 訂單列表：可依狀態、requested_at 日期區間、上車點/訂單 ID 關鍵字篩選並分頁。
+// 回應的 total 是符合條件的總筆數（不受 limit/offset 影響）。
 func (h *AdminHandler) Rides(c *gin.Context) {
-	var statusPtr *int16
-	if s := c.Query("status"); s != "" {
-		if n, err := strconv.ParseInt(s, 10, 16); err == nil {
-			v := int16(n)
-			statusPtr = &v
-		}
+	f, err := parseRideListFilter(c.Request.URL.Query())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
-	limit := 100
-	if l := c.Query("limit"); l != "" {
-		if n, err := strconv.Atoi(l); err == nil {
-			limit = n
-		}
-	}
-	rows, err := h.rides.ListRecent(statusPtr, limit)
+
+	rows, total, err := h.rides.List(f)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"rides": rows})
+
+	limit := f.Limit
+	if limit <= 0 {
+		limit = repository.RideListDefaultLimit
+	}
+	if rows == nil {
+		rows = []repository.AdminRideRow{} // 空結果回 []，不要讓 nil slice 序列化成 null
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"rides":  rows,
+		"total":  total,
+		"limit":  limit,
+		"offset": f.Offset,
+	})
 }
 
 // RideDetail GET /api/admin/rides/:id：單筆訂單 + 軌跡 GeoJSON
