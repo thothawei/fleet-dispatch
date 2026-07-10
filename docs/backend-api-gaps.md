@@ -55,7 +55,13 @@
 
 > 驗證：service 整合測試（上下線狀態轉移＋載客中守門、GetActiveRideByDriver）＋對真 server 實跑
 > 全部端點（me/online/offline/rides·active/decline 皆回正確狀態；track owner 200／他人 403）。
-> **小尾巴**：✅ 已完成（2026-07-08）。`ride.assigned` payload 含 `dropoff_address` 與選填 `dropoff_lat/lng`；LINE 叫車不帶目的地（設計取捨）。
+>
+> **✅ P1 小尾巴——dropoff 資料鏈補全（2026-07-10）**
+> - 下單流程：App `/api/rides` POST + LINE webhook 均支援 dropoff_lat/lng/address 參數傳入
+> - 資料層：RideRepository.Create() 條件式存 dropoff_point (PostGIS geography) 與 dropoff_address
+> - 派單事件：DispatchService.pushOffer() Payload 包含完整 ride object（含 dropoff），司機 WS 訂閱即可取得導航資訊
+> - 驗收：單元測試 (ride_dropoff_test.go with/without cases)、整合測試 (testcontainers PostGIS)、煙霧測試 (真實伺服器端點驗證 DB 寫入)
+> - 結果：司機「上車後導航去目的地」資料鏈已通暢
 
 ---
 
