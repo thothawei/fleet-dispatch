@@ -72,8 +72,7 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 
 ## 下次任務
 
-1. **開 main 分支保護**：go-ci **有**在 `21e031d` 與後續 docs commit 兩次轉紅（run 29082655288／29082686314），
-   但被無視、照樣推。CI 抓得到不代表擋得住——需要 GitHub branch protection 要求 go-ci 綠燈才能 push/merge。
+1. ~~**開 main 分支保護**~~：✅ 2026-07-10，三個 repo 都已設定（見下方「Git 工作流」）。
 2. **座標導航 E2E**：`docker compose up` 後跑 `scripts/smoke_test.sh`，確認 pickup 回應含 `dropoff_lat/lng`；
    再配 App 模擬器驗司機端「導航去目的地」開出的是座標而非地址。
 3. **E3 生產部署 / E4 監控**（尚未開始，DevOps 剩下的兩項）。
@@ -84,6 +83,23 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
    （`internal/repository/repository.go:505`）只吃 status + limit，沒有 offset／日期區間／關鍵字。
    後台目前只能在「已載入的最近 100 筆」內做 client-side 過濾（頁面已明文標示這個限制）。
    要做真分頁需替 `GET /api/admin/rides` 加上 `offset`、`from`/`to`、`q` 參數。
+
+## Git 工作流（2026-07-10 起）
+
+三個 repo 的 `main` 都開了 GitHub branch protection，**不能再直接 push**：
+
+| repo | required status check |
+|---|---|
+| `thothawei/fleet-dispatch` | `build-and-unit-test` |
+| `thothawei/fleet-frontEnd`（line-fleet-admin） | `check` |
+| `thothawei/fleet-app` | `analyze-and-test` |
+
+共通設定：`enforce_admins: true`（owner 也擋，實測直推會 `protected branch hook declined`）、
+需經 PR 但 `required_approving_review_count: 0`（可自己 merge，不會死鎖）、
+`strict: true`（PR 分支需與 main 同步）、禁 force push、禁刪分支。
+
+流程：開 branch → `gh pr create` → 等 CI 綠 → `gh pr merge --squash --delete-branch`。
+起因見 `decisions.md`：go-ci 兩次轉紅仍被無視照推，main 上有三個 commit 編譯失敗。
 
 ## 環境備忘
 - Flutter/Android 環境變數在 `~/.zshrc`（JAVA_HOME→openjdk@17、ANDROID_HOME、PATH）。Bash 工具跨回合 cwd 會重設，跑 flutter/adb 前自行 export。
