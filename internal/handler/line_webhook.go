@@ -114,12 +114,16 @@ func (h *LineWebhookHandler) handleMessage(c *gin.Context, event lineEvent) int6
 		return 0
 	}
 
+	// 以測試預設目的地（台北 101）建立訂單；實際應用可優化為接收目的地座標或文字地址
 	ride, err := h.rideService.CreateFromLocation(c.Request.Context(), service.RideRequest{
-		LineUserID:    event.Source.UserID,
-		DisplayName:   "",
-		PickupLat:     event.Message.Latitude,
-		PickupLng:     event.Message.Longitude,
-		PickupAddress: event.Message.Address,
+		LineUserID:     event.Source.UserID,
+		DisplayName:    "",
+		PickupLat:      event.Message.Latitude,
+		PickupLng:      event.Message.Longitude,
+		PickupAddress:  event.Message.Address,
+		DropoffLat:     25.034,
+		DropoffLng:     121.565,
+		DropoffAddress: "台北 101",
 	})
 	if err != nil {
 		log.Error().Err(err).Str("line_user_id", event.Source.UserID).Msg("建立叫車訂單失敗")
