@@ -127,6 +127,7 @@ func main() {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(middleware.CORS())
 
 	// Handlers
 	healthHandler := handler.NewHealthHandler(db, redisClient)
