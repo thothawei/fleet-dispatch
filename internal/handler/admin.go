@@ -31,9 +31,15 @@ type AdminHandler struct {
 	reports          *repository.ReportRepository
 	adminRepo        *repository.AdminRepository
 	adminUsers       *service.AdminUsers
+	feeSettings      *service.FeeSettings
 	redis            *redisstore.Store
 	jwtSecret        string
 	jwtExpiryHours   int
+}
+
+// SetFeeSettings 注入費率設定服務（供 /settings/fees 讀寫）；可選。
+func (h *AdminHandler) SetFeeSettings(fs *service.FeeSettings) {
+	h.feeSettings = fs
 }
 
 func NewAdminHandler(
@@ -254,6 +260,40 @@ func (h *AdminHandler) DailyReport(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"date": date, "drivers": rows})
 }
 
+const reportMonthLayout = "2006-01"
+
+// MonthlyReport GET /api/admin/reports/monthly?month=2026-07
+// 月營運報表：每司機營業額/手續費/司機實得，並補上月會費與「應付總公司」。
+func (h *AdminHandler) MonthlyReport(c *gin.Context) {
+	month := c.Query("month")
+	if month == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "請提供 month 參數（YYYY-MM）"})
+		return
+	}
+	if _, err := time.Parse(reportMonthLayout, month); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "month 需為 YYYY-MM 格式"})
+		return
+	}
+	rows, err := h.reports.MonthlyDriverStats(month)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// 會費：當月有完成行程的司機各計一筆月會費；應付總公司 = 手續費 + 月會費。
+	var membership int64
+	if h.feeSettings != nil {
+		membership = h.feeSettings.MonthlyMembershipFeeCents()
+	}
+	for i := range rows {
+		rows[i].MembershipFeeCents = membership
+		rows[i].OwedToHqCents = rows[i].TotalCommissionCents + membership
+	}
+	if rows == nil {
+		rows = []repository.MonthlyDriverReport{}
+	}
+	c.JSON(http.StatusOK, gin.H{"month": month, "drivers": rows})
+}
+
 // PatchDriverStatus PATCH /api/admin/drivers/:id/status — 啟用/停用司機
 func (h *AdminHandler) PatchDriverStatus(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -306,6 +346,41 @@ func (h *AdminHandler) PutDispatchSettings(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, h.dispatchSettings.JSON())
+}
+
+// GetFeeSettings GET /api/admin/settings/fees（superadmin）
+func (h *AdminHandler) GetFeeSettings(c *gin.Context) {
+	if h.feeSettings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "費率設定未啟用"})
+		return
+	}
+	c.JSON(http.StatusOK, h.feeSettings.JSON())
+}
+
+// PutFeeSettings PUT /api/admin/settings/fees（superadmin）
+func (h *AdminHandler) PutFeeSettings(c *gin.Context) {
+	if h.feeSettings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "費率設定未啟用"})
+		return
+	}
+	var req struct {
+		BaseFareCents             *int64 `json:"base_fare_cents"`
+		PerKmFareCents            *int64 `json:"per_km_fare_cents"`
+		MinFareCents              *int64 `json:"min_fare_cents"`
+		CommissionBps             *int64 `json:"commission_bps"`
+		MonthlyMembershipFeeCents *int64 `json:"monthly_membership_fee_cents"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	actorID := middleware.AdminIDFromCtx(c)
+	if err := h.feeSettings.Update(req.BaseFareCents, req.PerKmFareCents, req.MinFareCents,
+		req.CommissionBps, req.MonthlyMembershipFeeCents, &actorID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, h.feeSettings.JSON())
 }
 
 // CancelRide POST /api/admin/rides/:id/cancel — 後台強制取消

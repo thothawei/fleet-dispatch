@@ -320,15 +320,26 @@ func (r *RideRepository) MarkPickedUp(id int64) error {
 		}).Error
 }
 
-func (r *RideRepository) CompleteRide(id int64, distanceM int) error {
+// CompleteRide 完成行程並定格計費欄位（fare/commission/net 為 nil 時該欄位不寫入，維持 NULL）。
+func (r *RideRepository) CompleteRide(id int64, distanceM int, fareCents, commissionCents, driverNetCents *int64) error {
 	now := time.Now()
+	updates := map[string]interface{}{
+		"status":       constants.RideStatusCompleted,
+		"completed_at": now,
+		"distance_m":   distanceM,
+		"updated_at":   now,
+	}
+	if fareCents != nil {
+		updates["fare_amount_cents"] = *fareCents
+	}
+	if commissionCents != nil {
+		updates["commission_amount_cents"] = *commissionCents
+	}
+	if driverNetCents != nil {
+		updates["driver_net_amount_cents"] = *driverNetCents
+	}
 	return r.db.Model(&model.Ride{}).Where("id = ? AND status = ?", id, constants.RideStatusPickedUp).
-		Updates(map[string]interface{}{
-			"status":       constants.RideStatusCompleted,
-			"completed_at": now,
-			"distance_m":   distanceM,
-			"updated_at":   now,
-		}).Error
+		Updates(updates).Error
 }
 
 func (r *RideRepository) GetCustomerLineUserID(rideID int64) (string, error) {
@@ -438,26 +449,131 @@ type DailyDriverReport struct {
 	DriverID       int64   `json:"driver_id"`
 	DriverName     string  `json:"driver_name"`
 	TripCount      int     `json:"trip_count"`
-	TotalDistanceM int     `json:"total_distance_m"`
+	TotalDistanceM int64   `json:"total_distance_m"` // int64 防大量加總溢位（F9-2）
 	AvgPickupSec   float64 `json:"avg_pickup_sec"`
+	// 金額欄位（分）：營業額、手續費、司機實得（F5）。
+	TotalRevenueCents    int64 `json:"total_revenue_cents"`
+	TotalCommissionCents int64 `json:"total_commission_cents"`
+	DriverNetCents       int64 `json:"driver_net_cents"`
 }
 
 func (r *ReportRepository) DailyDriverStats(date string) ([]DailyDriverReport, error) {
+	// date 為 YYYY-MM-DD。用半開區間 [date, date+1) 而非 completed_at::date 轉型，
+	// 讓查詢 sargable、能走 idx_rides_status_completed 索引（F9-1）；加總一律 ::bigint 防溢位（F9-2）。
 	var rows []DailyDriverReport
 	err := r.db.Raw(`
 		SELECT
 			r.driver_id,
 			d.name AS driver_name,
 			COUNT(*)::int AS trip_count,
-			COALESCE(SUM(r.distance_m), 0)::int AS total_distance_m,
-			COALESCE(AVG(EXTRACT(EPOCH FROM (r.accepted_at - r.requested_at))), 0) AS avg_pickup_sec
+			COALESCE(SUM(r.distance_m), 0)::bigint AS total_distance_m,
+			COALESCE(AVG(EXTRACT(EPOCH FROM (r.accepted_at - r.requested_at))), 0) AS avg_pickup_sec,
+			COALESCE(SUM(r.fare_amount_cents), 0)::bigint AS total_revenue_cents,
+			COALESCE(SUM(r.commission_amount_cents), 0)::bigint AS total_commission_cents,
+			COALESCE(SUM(r.driver_net_amount_cents), 0)::bigint AS driver_net_cents
 		FROM rides r
 		JOIN drivers d ON d.id = r.driver_id
-		WHERE r.status = ? AND r.completed_at::date = ?::date
+		WHERE r.status = ?
+		  AND r.completed_at >= ?::date
+		  AND r.completed_at < (?::date + INTERVAL '1 day')
 		GROUP BY r.driver_id, d.name
 		ORDER BY trip_count DESC
-	`, constants.RideStatusCompleted, date).Scan(&rows).Error
+	`, constants.RideStatusCompleted, date, date).Scan(&rows).Error
 	return rows, err
+}
+
+// MonthlyDriverReport 月營運報表每司機一列。MembershipFeeCents / OwedToHqCents
+// 屬「應付總公司」語意，由 handler 依當前費率補上（repo 只回聚合數字）。
+type MonthlyDriverReport struct {
+	DriverID             int64 `json:"driver_id"`
+	DriverName           string `json:"driver_name"`
+	TripCount            int   `json:"trip_count"`
+	TotalRevenueCents    int64 `json:"total_revenue_cents"`
+	TotalCommissionCents int64 `json:"total_commission_cents"`
+	DriverNetCents       int64 `json:"driver_net_cents"`
+	MembershipFeeCents   int64 `json:"membership_fee_cents"`
+	OwedToHqCents        int64 `json:"owed_to_hq_cents"`
+}
+
+// MonthlyDriverStats 月報表聚合（F6）。month 為 YYYY-MM。
+// 用半開區間 [month-01, +1 month) 走 idx_rides_status_completed；只回當月有完成行程的司機。
+func (r *ReportRepository) MonthlyDriverStats(month string) ([]MonthlyDriverReport, error) {
+	monthStart := month + "-01"
+	var rows []MonthlyDriverReport
+	err := r.db.Raw(`
+		SELECT
+			r.driver_id,
+			d.name AS driver_name,
+			COUNT(*)::int AS trip_count,
+			COALESCE(SUM(r.fare_amount_cents), 0)::bigint AS total_revenue_cents,
+			COALESCE(SUM(r.commission_amount_cents), 0)::bigint AS total_commission_cents,
+			COALESCE(SUM(r.driver_net_amount_cents), 0)::bigint AS driver_net_cents
+		FROM rides r
+		JOIN drivers d ON d.id = r.driver_id
+		WHERE r.status = ?
+		  AND r.completed_at >= ?::date
+		  AND r.completed_at < (?::date + INTERVAL '1 month')
+		GROUP BY r.driver_id, d.name
+		ORDER BY total_revenue_cents DESC
+	`, constants.RideStatusCompleted, monthStart, monthStart).Scan(&rows).Error
+	return rows, err
+}
+
+// DriverEarnings 單一司機當月收入聚合（F7）。
+type DriverEarnings struct {
+	TripCount            int   `json:"trip_count"`
+	TotalRevenueCents    int64 `json:"total_revenue_cents"`
+	TotalCommissionCents int64 `json:"total_commission_cents"`
+	DriverNetCents       int64 `json:"driver_net_cents"`
+}
+
+// DriverMonthlyEarnings 查單一司機當月收入（F7）。month 為 YYYY-MM。
+// SUM 無 GROUP BY 恆回一列（無資料則為 0），走 idx_rides_driver_completed。
+func (r *ReportRepository) DriverMonthlyEarnings(driverID int64, month string) (DriverEarnings, error) {
+	monthStart := month + "-01"
+	var e DriverEarnings
+	err := r.db.Raw(`
+		SELECT
+			COUNT(*)::int AS trip_count,
+			COALESCE(SUM(fare_amount_cents), 0)::bigint AS total_revenue_cents,
+			COALESCE(SUM(commission_amount_cents), 0)::bigint AS total_commission_cents,
+			COALESCE(SUM(driver_net_amount_cents), 0)::bigint AS driver_net_cents
+		FROM rides
+		WHERE driver_id = ? AND status = ?
+		  AND completed_at >= ?::date
+		  AND completed_at < (?::date + INTERVAL '1 month')
+	`, driverID, constants.RideStatusCompleted, monthStart, monthStart).Scan(&e).Error
+	return e, err
+}
+
+// FeeSettingsRepository 費率設定（單列）讀寫。
+type FeeSettingsRepository struct {
+	db *gorm.DB
+}
+
+func NewFeeSettingsRepository(db *gorm.DB) *FeeSettingsRepository {
+	return &FeeSettingsRepository{db: db}
+}
+
+// Get 讀取單列費率設定（id=1，由 migration 種下，恆存在）。
+func (r *FeeSettingsRepository) Get() (model.FleetSettings, error) {
+	var s model.FleetSettings
+	err := r.db.Where("id = ?", 1).First(&s).Error
+	return s, err
+}
+
+// Update 覆寫費率設定（單列 id=1）。
+func (r *FeeSettingsRepository) Update(s *model.FleetSettings) error {
+	return r.db.Model(&model.FleetSettings{}).Where("id = ?", 1).
+		Updates(map[string]interface{}{
+			"base_fare_cents":              s.BaseFareCents,
+			"per_km_fare_cents":            s.PerKmFareCents,
+			"min_fare_cents":               s.MinFareCents,
+			"commission_bps":               s.CommissionBps,
+			"monthly_membership_fee_cents": s.MonthlyMembershipFeeCents,
+			"updated_by":                   s.UpdatedBy,
+			"updated_at":                   time.Now(),
+		}).Error
 }
 
 func (r *RideRepository) IsWithinPickup(id int64, lat, lng float64, radiusM float64) (bool, error) {

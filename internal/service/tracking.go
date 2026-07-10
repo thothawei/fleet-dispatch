@@ -35,6 +35,7 @@ type TrackingService struct {
 	dispatch  *DispatchService
 	publisher events.Publisher
 	audit     rideAuditor
+	fees      *FeeSettings
 
 	etaMinInterval   time.Duration
 	etaDistThreshold float64
@@ -72,6 +73,11 @@ func NewTrackingService(
 // SetRideEvents 注入訂單狀態審計寫入；可選。
 func (s *TrackingService) SetRideEvents(repo *repository.RideEventRepository) {
 	s.audit = rideAuditor{events: repo}
+}
+
+// SetFeeSettings 注入費率設定，完成行程時據此定格計費；可選（未注入則不計費）。
+func (s *TrackingService) SetFeeSettings(fees *FeeSettings) {
+	s.fees = fees
 }
 
 // publish nil-safe 事件發佈
@@ -226,17 +232,29 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 		return ErrForbidden
 	}
 	distanceM, _ := s.rides.TrackDistanceM(rideID)
-	if err := s.rides.CompleteRide(rideID, distanceM); err != nil {
+
+	// 費率快照：完成當下依當前費率算好車資/手續費/實得，定格寫進本筆 ride。
+	// 未注入費率設定時（如部分測試）三者留 NULL，不影響完成流程。
+	var fareCents, commissionCents, driverNetCents *int64
+	if s.fees != nil {
+		f, c, n := s.fees.Quote(distanceM)
+		fareCents, commissionCents, driverNetCents = &f, &c, &n
+	}
+	if err := s.rides.CompleteRide(rideID, distanceM, fareCents, commissionCents, driverNetCents); err != nil {
 		return err
 	}
 	s.audit.record(rideID, statusPtr(constants.RideStatusPickedUp), constants.RideStatusCompleted,
 		events.TypeRideCompleted, events.ActorDriver, idPtr(driverID), "")
 	_ = s.drivers.UpdateStatus(driverID, constants.DriverStatusIdle)
 
+	completedPayload := map[string]any{"distance_m": distanceM}
+	if fareCents != nil {
+		completedPayload["fare_amount_cents"] = *fareCents // 供乘客端完成卡顯示車資（E2）
+	}
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:    events.TypeRideCompleted,
 		RideID:  rideID,
-		Payload: map[string]any{"distance_m": distanceM},
+		Payload: completedPayload,
 	})
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
 		Type:   events.TypeRideCompleted,

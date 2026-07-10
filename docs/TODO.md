@@ -31,43 +31,43 @@
 
 ### 施作項目（嚴格相依，由上而下）
 
-- [ ] **F1. 費率設定表 `fleet_settings`**（migration `000011`）
-      單列設定表，欄位：`base_fare`（起步價）、`per_km_fare`（每公里）、
-      `commission_rate`（手續費%，如 0.15）、`monthly_membership_fee`（月會費）、
-      `min_fare`（最低車資）、`updated_by`、`updated_at`。
-      預設值以 seed 塞一筆，避免完成計費時讀不到設定。
+> **實作進度（2026-07-11）**：F1–F7、F9-1、F9-2 已完成並過測試（build/vet 綠、
+> 費率單元測試 6 案、testcontainers 整合測試 `TestBillingReports`/`TestCompleteRideSnapshotsFare`
+> 對真 Postgres 跑全 migration 通過）。命名實作採 `*_cents`（金額存分）、`commission_bps`
+> （手續費存基點，避免浮點）。**唯一暫緩**：F3 的 OSRM 里程退路（見下）。
 
-- [ ] **F2. rides 加計費欄位**（migration `000012`）
-      `fare_amount`（車資）、`commission_amount`（手續費）、
-      `driver_net_amount`（司機實得＝車資−手續費）。三者於完成時定格寫入。
-      同步更新 `model.Ride` 與 `AdminRideRow` 投影 + json tag（snake_case）。
+- [x] **F1. 費率設定表 `fleet_settings`**（migration `000011`）✅
+      單列表（`id` 固定 1），欄位 `base_fare_cents`／`per_km_fare_cents`／`min_fare_cents`／
+      `commission_bps`（1500=15%）／`monthly_membership_fee_cents`／`updated_by`／`updated_at`，
+      含非負與 bps≤10000 的 CHECK，seed 一列預設。model：`model.FleetSettings`。
 
-- [ ] **F3. 完成時計算車資**（`internal/service/tracking.go` 的完成路徑）
-      里程 → 讀當前 `fleet_settings` → `fare = base + per_km × (distance_m/1000)`
-      （低於 `min_fare` 取 `min_fare`）→ `commission = round(fare × rate)` →
-      連同 `driver_net` 一起寫進 ride。
-      **退路**：`distance_m == 0`（軌跡稀疏／缺失）時，改用 OSRM 算 pickup→dropoff
-      路線距離；仍為 0 則收 `min_fare`。
-      **規則**：只有 `COMPLETED` 才計費；`CANCELLED` 不計。
+- [x] **F2. rides 加計費欄位**（migration `000012`）✅
+      `fare_amount_cents`／`commission_amount_cents`／`driver_net_amount_cents`（BIGINT，nullable，
+      完成時定格）。`model.Ride` 已加對應 `*int64` 欄位 + snake_case json tag。
 
-- [ ] **F4. 費率設定 API**（superadmin，沿用 `SettingsService` 模式）
-      `GET /api/admin/settings/fees`、`PUT /api/admin/settings/fees`。
-      （對照既有 `GET/PUT /api/admin/settings/dispatch`。）
+- [x] **F3. 完成時計算車資**（`internal/service/tracking.go` 的 `Complete`）✅
+      里程 → `FeeSettings.Quote()`（`internal/service/fee_settings.go`，全整數運算）→
+      定格寫進 ride；同時把 `fare_amount_cents` 塞進乘客 `ride.completed` 事件（為 E2 鋪路）。
+      只有 `COMPLETED` 計費。
+      **暫緩**：`distance_m == 0` 目前用 `min_fare` 樓地板擋「算成 0」，但中段里程軌跡稀疏仍會偏低；
+      OSRM pickup→dropoff 退路尚未接（需把 OSRM/ETA 注入 TrackingService），留待強化。
 
-- [ ] **F5. 日報表金額擴充**（`ReportRepository.DailyDriverStats`）
-      SELECT 加 `SUM(fare_amount) AS total_revenue`、`SUM(commission_amount) AS total_commission`、
-      `SUM(driver_net_amount) AS driver_net`。回傳型別 `DailyDriverReport` 同步加欄位。
+- [x] **F4. 費率設定 API**（superadmin）✅
+      `GET/PUT /api/admin/settings/fees`（`AdminHandler.GetFeeSettings`/`PutFeeSettings`），
+      掛在 superadmin 路由。費率採 **DB 持久化 + 記憶體快取**（刻意不同於 `DispatchSettings`
+      的 env-記憶體式），重啟不還原、避免算錯帳。
 
-- [ ] **F6. 月營運報表 API**（新端點）
-      `GET /api/admin/reports/monthly?month=YYYY-MM`：每位司機 →
-      趟數、營業額（SUM fare）、手續費（SUM commission）、月會費（讀 `monthly_membership_fee`）、
-      **應付總公司＝手續費＋月會費**、司機實得。
-      月會費：對「當月有完成行程的司機」各計一筆固定月會費（**先算不落帳**；
-      已繳/未繳狀態管理見 F8 Phase 2）。
+- [x] **F5. 日報表金額擴充**（`ReportRepository.DailyDriverStats`）✅
+      加 `total_revenue_cents`／`total_commission_cents`／`driver_net_cents`；
+      同時修掉大資料量兩坑（見 F9-1/F9-2）。
 
-- [ ] **F7. 司機收入 API**（app 司機端用）
-      `GET /api/driver/earnings?month=YYYY-MM`（driver JWT）：回傳自己的
-      趟數／營業額／手續費／實得／本月會費／應付總公司。
+- [x] **F6. 月營運報表 API**（新端點）✅
+      `GET /api/admin/reports/monthly?month=YYYY-MM`（viewer 唯讀）：每司機趟數／營業額／手續費／
+      司機實得（repo 聚合），handler 補月會費與 **應付總公司＝手續費＋月會費**（當月有完成行程者計會費）。
+
+- [x] **F7. 司機收入 API**（app 司機端用）✅
+      `GET /api/driver/earnings?month=YYYY-MM`（driver JWT，`DriverHandler.Earnings`）：
+      回傳趟數／營業額／手續費／實得／本月會費／應付總公司；無趟數則不收會費。
 
 - [ ] **F8.（Phase 2）會費落帳 `membership_invoices`**
       `driver_id`、`period_year_month`、`amount`、`status`（未繳/已繳）、`paid_at`。
@@ -80,15 +80,15 @@
 > 現行日報表用 `WHERE r.completed_at::date = ?::date`（函式轉型 → 索引失效、全表掃）；
 > 投影 `TotalDistanceM int`（`repository.go:441`）在大量加總下會溢位。這些在建計費/報表時一併修。
 
-- [ ] **F9-1. sargable 範圍查詢 + 複合索引**
-      報表 `WHERE` 一律改 `completed_at >= :start AND completed_at < :end`
-      （移除 `completed_at::date` 轉型）。新增 migration：
-      `idx_rides_completed`（`status, completed_at`）供日/月報表；
-      `idx_rides_driver_completed`（`driver_id, completed_at`）供司機收入查詢（F7）。
+- [x] **F9-1. sargable 範圍查詢 + 複合索引** ✅
+      日/月/司機收入查詢都改半開區間（`completed_at >= start AND < end`，移除 `::date` 轉型）；
+      migration `000012` 建 `idx_rides_status_completed`（`status, completed_at`）與
+      `idx_rides_driver_completed`（`driver_id, completed_at`）。
+      > 待補：以造數腳本灌 50~100 萬筆做 `EXPLAIN ANALYZE`，確認實走索引範圍掃描（見驗收）。
 
-- [ ] **F9-2. 加總型別防溢位**
-      `SUM(fare_amount)`／`SUM(commission_amount)`／里程加總投影改 **int64 / NUMERIC**
-      （現行 `int` 在百萬筆量級會溢位）；金額欄位本身用 `BIGINT`（存分）。
+- [x] **F9-2. 加總型別防溢位** ✅
+      報表金額加總與里程加總一律 `::bigint`／Go `int64`；
+      金額欄位本身 `BIGINT`（存分）。`DailyDriverReport.TotalDistanceM` 由 `int` 改 `int64`。
 
 - [ ] **F9-3. 預聚合彙總表 `daily_driver_earnings`**（量體上升後啟用）
       欄位：`driver_id, day, trip_count, revenue, commission, net`，
