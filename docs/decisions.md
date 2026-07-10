@@ -78,6 +78,8 @@
   go-ci 其實兩次都轉紅（run `29082655288`／`29082686314`），但被無視、照樣 push。
   → **教訓：commit 前必跑 `go build ./... && go vet ./internal/...`；聲稱跑過的測試要貼實際輸出。
   CI 抓得到不代表擋得住——main 需要 branch protection。**
+  → ✅ 2026-07-10 已補上：三個 repo 的 main 都開了 branch protection（`enforce_admins: true`，
+  owner 也擋）。實測直推會被 `protected branch hook declined` 拒絕。詳見 STATUS.md「Git 工作流」。
 - **LINE 叫車不塞預設目的地**：webhook 只收得到位置訊息（＝上車點），流程中沒有目的地輸入來源。
   `21e031d` 硬編「台北 101」當預設 dropoff，會讓每張 LINE 訂單的司機上車後導航到 101。已移除；
   LINE 訂單 dropoff 維持 NULL（設計取捨），帶目的地的訂單來自乘客 App 的 `POST /api/rides`。
