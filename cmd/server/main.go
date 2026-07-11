@@ -63,6 +63,7 @@ func main() {
 	reportRepo := repository.NewReportRepository(db)
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 	rideEventRepo := repository.NewRideEventRepository(db)
+	feeSettingsRepo := repository.NewFeeSettingsRepository(db)
 
 	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
 	if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
@@ -100,6 +101,12 @@ func main() {
 		cfg.DispatchOfferTimeoutSec, cfg.DispatchMaxAttempts, 5,
 	)
 
+	// 費率設定：自 DB 載入單列（migration 已種下），供完成計費與後台設定使用。
+	feeSettings, err := service.NewFeeSettings(feeSettingsRepo)
+	if err != nil {
+		log.Fatal().Err(err).Msg("載入費率設定失敗")
+	}
+
 	// Services
 	dispatchService := service.NewDispatchService(
 		driverRepo, rideRepo, customerRepo, redisStore, lineClient, etaService,
@@ -118,6 +125,7 @@ func main() {
 		hub,
 	)
 	trackingService.SetRideEvents(rideEventRepo)
+	trackingService.SetFeeSettings(feeSettings)
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
 
@@ -133,6 +141,7 @@ func main() {
 	healthHandler := handler.NewHealthHandler(db, redisClient)
 	lineHandler := handler.NewLineWebhookHandler(rideService, dispatchService, driverRepo, lineClient)
 	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, rideQueryService, cfg.JWTSecret, cfg.JWTExpiryHours)
+	driverHandler.SetEarnings(reportRepo, feeSettings)
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenService)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
@@ -151,6 +160,7 @@ func main() {
 		driverRepo, rideRepo, trackRepo, rideEventRepo, reportRepo, adminRepo, adminUsers, redisStore,
 		cfg.JWTSecret, cfg.JWTExpiryHours,
 	)
+	adminHandler.SetFeeSettings(feeSettings)
 
 	// 乘客認證：註冊/登入（line_user_id + 密碼 JWT）
 	customerRegistry := service.NewCustomerRegistry(customerRepo)
@@ -188,6 +198,7 @@ func main() {
 		authed.Use(middleware.DriverAuth(cfg.JWTSecret))
 		{
 			authed.GET("/driver/me", driverHandler.Me)
+			authed.GET("/driver/earnings", driverHandler.Earnings)
 			authed.POST("/driver/online", driverHandler.Online)
 			authed.POST("/driver/offline", driverHandler.Offline)
 			authed.GET("/driver/rides/active", driverHandler.ActiveRide)
@@ -225,6 +236,7 @@ func main() {
 				read.GET("/rides", adminHandler.Rides)
 				read.GET("/rides/:id", adminHandler.RideDetail)
 				read.GET("/reports/daily", adminHandler.DailyReport)
+				read.GET("/reports/monthly", adminHandler.MonthlyReport)
 				read.GET("/settings/dispatch", adminHandler.GetDispatchSettings)
 			}
 			// dispatcher：派單操作
@@ -242,6 +254,13 @@ func main() {
 				sup.GET("", adminHandler.ListAdmins)
 				sup.POST("", adminHandler.CreateAdmin)
 				sup.PATCH("/:id", adminHandler.UpdateAdmin)
+			}
+			// superadmin：費率設定（手續費/會費/車資費率）
+			supSettings := adminG.Group("")
+			supSettings.Use(middleware.RequireAdminRole(auth.RoleSuperadmin))
+			{
+				supSettings.GET("/settings/fees", adminHandler.GetFeeSettings)
+				supSettings.PUT("/settings/fees", adminHandler.PutFeeSettings)
 			}
 		}
 	}

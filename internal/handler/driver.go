@@ -10,6 +10,7 @@ import (
 	"line-fleet-dispatch/internal/auth"
 	"line-fleet-dispatch/internal/middleware"
 	"line-fleet-dispatch/internal/model"
+	"line-fleet-dispatch/internal/repository"
 	"line-fleet-dispatch/internal/service"
 )
 
@@ -18,8 +19,16 @@ type DriverHandler struct {
 	tracking       *service.TrackingService
 	drivers        *service.DriverRegistry
 	rides          *service.RideQueryService
+	reports        *repository.ReportRepository
+	feeSettings    *service.FeeSettings
 	jwtSecret      string
 	jwtExpiryHours int
+}
+
+// SetEarnings 注入收入查詢所需的報表 repo 與費率設定（供 /driver/earnings）；可選。
+func (h *DriverHandler) SetEarnings(reports *repository.ReportRepository, fees *service.FeeSettings) {
+	h.reports = reports
+	h.feeSettings = fees
 }
 
 func NewDriverHandler(
@@ -57,6 +66,43 @@ func (h *DriverHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, driverPublic(d))
+}
+
+// Earnings GET /api/driver/earnings?month=2026-07 — 司機當月收入（F7）
+// 回傳趟數、營業額、手續費、司機實得、月會費、應付總公司（皆為「分」）。
+func (h *DriverHandler) Earnings(c *gin.Context) {
+	if h.reports == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "收入查詢未啟用"})
+		return
+	}
+	month := c.Query("month")
+	if month == "" {
+		month = time.Now().Format("2006-01")
+	}
+	if _, err := time.Parse("2006-01", month); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "month 需為 YYYY-MM 格式"})
+		return
+	}
+	driverID := middleware.DriverIDFromCtx(c)
+	e, err := h.reports.DriverMonthlyEarnings(driverID, month)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	// 會費：當月有完成行程才收；應付總公司 = 手續費 + 月會費。
+	var membership int64
+	if h.feeSettings != nil && e.TripCount > 0 {
+		membership = h.feeSettings.MonthlyMembershipFeeCents()
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"month":                  month,
+		"trip_count":             e.TripCount,
+		"total_revenue_cents":    e.TotalRevenueCents,
+		"total_commission_cents": e.TotalCommissionCents,
+		"driver_net_cents":       e.DriverNetCents,
+		"membership_fee_cents":   membership,
+		"owed_to_hq_cents":       e.TotalCommissionCents + membership,
+	})
 }
 
 // Online POST /api/driver/online — 顯式上線（設為待命，重新進入派單池）

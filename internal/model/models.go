@@ -143,12 +143,32 @@ type Ride struct {
 	CompletedAt    *time.Time `gorm:"" json:"completed_at"`
 	DistanceM      *int       `gorm:"column:distance_m" json:"distance_m"`
 	EtaPickupSec   *int       `gorm:"column:eta_pickup_sec" json:"eta_pickup_sec"`
-	CreatedAt      time.Time  `gorm:"not null" json:"created_at"`
-	UpdatedAt      time.Time  `gorm:"not null" json:"updated_at"`
+	// 計費欄位：完成時定格寫入（費率快照制），一律以「分」儲存；未完成/取消為 nil。
+	FareAmountCents       *int64    `gorm:"column:fare_amount_cents" json:"fare_amount_cents"`
+	CommissionAmountCents *int64    `gorm:"column:commission_amount_cents" json:"commission_amount_cents"`
+	DriverNetAmountCents  *int64    `gorm:"column:driver_net_amount_cents" json:"driver_net_amount_cents"`
+	CreatedAt             time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt             time.Time `gorm:"not null" json:"updated_at"`
 }
 
 func (Ride) TableName() string {
 	return "rides"
+}
+
+// FleetSettings 費率設定（單列，id 固定為 1）。金額以「分」儲存，手續費以 bps 儲存。
+type FleetSettings struct {
+	ID                        int16     `gorm:"primaryKey" json:"-"`
+	BaseFareCents             int64     `gorm:"column:base_fare_cents;not null" json:"base_fare_cents"`
+	PerKmFareCents            int64     `gorm:"column:per_km_fare_cents;not null" json:"per_km_fare_cents"`
+	MinFareCents              int64     `gorm:"column:min_fare_cents;not null" json:"min_fare_cents"`
+	CommissionBps             int       `gorm:"column:commission_bps;not null" json:"commission_bps"`
+	MonthlyMembershipFeeCents int64     `gorm:"column:monthly_membership_fee_cents;not null" json:"monthly_membership_fee_cents"`
+	UpdatedBy                 *int64    `gorm:"column:updated_by" json:"updated_by"`
+	UpdatedAt                 time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
+}
+
+func (FleetSettings) TableName() string {
+	return "fleet_settings"
 }
 
 type Admin struct {
