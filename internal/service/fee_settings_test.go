@@ -18,11 +18,11 @@ func TestQuote(t *testing.T) {
 	fs := newFeeSettingsForTest(8500, 2000, 8500, 1500, 300000)
 
 	cases := []struct {
-		name                          string
-		distanceM                     int
-		wantFare, wantComm, wantNet   int64
+		name                        string
+		distanceM                   int
+		wantFare, wantComm, wantNet int64
 	}{
-		{"5km", 5000, 18500, 2775, 15725},   // 8500 + 20*5 元；15% = 2775
+		{"5km", 5000, 18500, 2775, 15725},  // 8500 + 20*5 元；15% = 2775
 		{"距離0落到最低車資", 0, 8500, 1275, 7225}, // fare=8500，round(8500*0.15)=1275
 		{"負距離視為0", -100, 8500, 1275, 7225},
 		{"短程仍計里程", 100, 8700, 1305, 7395}, // 8500 + round(2000*100/1000)=8700

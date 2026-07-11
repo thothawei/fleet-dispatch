@@ -138,8 +138,8 @@ func (s *FeeSettings) Update(baseFareCents, perKmFareCents, minFareCents, commis
 }
 
 func validateFeeSettings(s model.FleetSettings) error {
-	const maxFare = int64(1_000_000)          // 單筆金額上限 1 萬元（分）
-	const maxMembership = int64(100_000_000)   // 月會費上限 100 萬元（分）
+	const maxFare = int64(1_000_000)         // 單筆金額上限 1 萬元（分）
+	const maxMembership = int64(100_000_000) // 月會費上限 100 萬元（分）
 	switch {
 	case s.BaseFareCents < 0 || s.BaseFareCents > maxFare:
 		return ErrInvalidFeeSettings

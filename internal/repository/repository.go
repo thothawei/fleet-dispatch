@@ -485,14 +485,14 @@ func (r *ReportRepository) DailyDriverStats(date string) ([]DailyDriverReport, e
 // MonthlyDriverReport 月營運報表每司機一列。MembershipFeeCents / OwedToHqCents
 // 屬「應付總公司」語意，由 handler 依當前費率補上（repo 只回聚合數字）。
 type MonthlyDriverReport struct {
-	DriverID             int64 `json:"driver_id"`
+	DriverID             int64  `json:"driver_id"`
 	DriverName           string `json:"driver_name"`
-	TripCount            int   `json:"trip_count"`
-	TotalRevenueCents    int64 `json:"total_revenue_cents"`
-	TotalCommissionCents int64 `json:"total_commission_cents"`
-	DriverNetCents       int64 `json:"driver_net_cents"`
-	MembershipFeeCents   int64 `json:"membership_fee_cents"`
-	OwedToHqCents        int64 `json:"owed_to_hq_cents"`
+	TripCount            int    `json:"trip_count"`
+	TotalRevenueCents    int64  `json:"total_revenue_cents"`
+	TotalCommissionCents int64  `json:"total_commission_cents"`
+	DriverNetCents       int64  `json:"driver_net_cents"`
+	MembershipFeeCents   int64  `json:"membership_fee_cents"`
+	OwedToHqCents        int64  `json:"owed_to_hq_cents"`
 }
 
 // MonthlyDriverStats 月報表聚合（F6）。month 為 YYYY-MM。

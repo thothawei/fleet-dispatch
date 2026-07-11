@@ -144,11 +144,11 @@ type Ride struct {
 	DistanceM      *int       `gorm:"column:distance_m" json:"distance_m"`
 	EtaPickupSec   *int       `gorm:"column:eta_pickup_sec" json:"eta_pickup_sec"`
 	// 計費欄位：完成時定格寫入（費率快照制），一律以「分」儲存；未完成/取消為 nil。
-	FareAmountCents       *int64 `gorm:"column:fare_amount_cents" json:"fare_amount_cents"`
-	CommissionAmountCents *int64 `gorm:"column:commission_amount_cents" json:"commission_amount_cents"`
-	DriverNetAmountCents  *int64 `gorm:"column:driver_net_amount_cents" json:"driver_net_amount_cents"`
-	CreatedAt      time.Time  `gorm:"not null" json:"created_at"`
-	UpdatedAt      time.Time  `gorm:"not null" json:"updated_at"`
+	FareAmountCents       *int64    `gorm:"column:fare_amount_cents" json:"fare_amount_cents"`
+	CommissionAmountCents *int64    `gorm:"column:commission_amount_cents" json:"commission_amount_cents"`
+	DriverNetAmountCents  *int64    `gorm:"column:driver_net_amount_cents" json:"driver_net_amount_cents"`
+	CreatedAt             time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt             time.Time `gorm:"not null" json:"updated_at"`
 }
 
 func (Ride) TableName() string {
