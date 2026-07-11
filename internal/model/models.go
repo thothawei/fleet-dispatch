@@ -171,6 +171,22 @@ func (FleetSettings) TableName() string {
 	return "fleet_settings"
 }
 
+// MembershipInvoice 會費帳單（F8）。每月一列/司機，amount_cents 為產生時定格的月會費。
+type MembershipInvoice struct {
+	ID          int64      `gorm:"primaryKey" json:"id"`
+	DriverID    int64      `gorm:"column:driver_id;not null" json:"driver_id"`
+	Period      string     `gorm:"column:period;not null" json:"period"` // YYYY-MM
+	AmountCents int64      `gorm:"column:amount_cents;not null" json:"amount_cents"`
+	Status      string     `gorm:"column:status;not null;default:'unpaid'" json:"status"`
+	PaidAt      *time.Time `gorm:"column:paid_at" json:"paid_at"`
+	CreatedAt   time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"not null" json:"updated_at"`
+}
+
+func (MembershipInvoice) TableName() string {
+	return "membership_invoices"
+}
+
 type Admin struct {
 	ID           int64     `gorm:"primaryKey"`
 	Username     string    `gorm:"column:username;uniqueIndex;not null"`

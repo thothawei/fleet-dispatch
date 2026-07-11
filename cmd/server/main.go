@@ -64,6 +64,7 @@ func main() {
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 	rideEventRepo := repository.NewRideEventRepository(db)
 	feeSettingsRepo := repository.NewFeeSettingsRepository(db)
+	membershipInvoiceRepo := repository.NewMembershipInvoiceRepository(db)
 
 	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
 	if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
@@ -161,6 +162,7 @@ func main() {
 		cfg.JWTSecret, cfg.JWTExpiryHours,
 	)
 	adminHandler.SetFeeSettings(feeSettings)
+	adminHandler.SetMembershipInvoices(membershipInvoiceRepo)
 
 	// 乘客認證：註冊/登入（line_user_id + 密碼 JWT）
 	customerRegistry := service.NewCustomerRegistry(customerRepo)
@@ -237,6 +239,7 @@ func main() {
 				read.GET("/rides/:id", adminHandler.RideDetail)
 				read.GET("/reports/daily", adminHandler.DailyReport)
 				read.GET("/reports/monthly", adminHandler.MonthlyReport)
+				read.GET("/membership-invoices", adminHandler.ListMembershipInvoices)
 				read.GET("/settings/dispatch", adminHandler.GetDispatchSettings)
 			}
 			// dispatcher：派單操作
@@ -261,6 +264,8 @@ func main() {
 			{
 				supSettings.GET("/settings/fees", adminHandler.GetFeeSettings)
 				supSettings.PUT("/settings/fees", adminHandler.PutFeeSettings)
+				supSettings.POST("/membership-invoices/generate", adminHandler.GenerateMembershipInvoices)
+				supSettings.PATCH("/membership-invoices/:id", adminHandler.MarkMembershipInvoicePaid)
 			}
 		}
 	}
