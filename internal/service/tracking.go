@@ -11,6 +11,7 @@ import (
 	"line-fleet-dispatch/internal/events"
 	lineclient "line-fleet-dispatch/internal/line"
 	"line-fleet-dispatch/internal/model"
+	osrmclient "line-fleet-dispatch/internal/osrm"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
 	"line-fleet-dispatch/internal/util"
@@ -36,6 +37,7 @@ type TrackingService struct {
 	publisher events.Publisher
 	audit     rideAuditor
 	fees      *FeeSettings
+	osrm      *osrmclient.Client
 
 	etaMinInterval   time.Duration
 	etaDistThreshold float64
@@ -78,6 +80,11 @@ func (s *TrackingService) SetRideEvents(repo *repository.RideEventRepository) {
 // SetFeeSettings 注入費率設定，完成行程時據此定格計費；可選（未注入則不計費）。
 func (s *TrackingService) SetFeeSettings(fees *FeeSettings) {
 	s.fees = fees
+}
+
+// SetOSRM 注入 OSRM client，完成計費時作為 GPS 軌跡里程偏低（0/稀疏）的退路；可選。
+func (s *TrackingService) SetOSRM(osrm *osrmclient.Client) {
+	s.osrm = osrm
 }
 
 // publish nil-safe 事件發佈
@@ -223,6 +230,18 @@ func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) (*
 }
 
 // Complete 完成行程
+// billableDistanceM 決定計費里程（公尺）：GPS 軌跡里程與 OSRM 路線里程取大者。
+// routeM < 0 代表無路線可用（無目的地座標或未注入 OSRM），直接用軌跡里程。
+func billableDistanceM(trackM, routeM int) int {
+	if trackM < 0 {
+		trackM = 0
+	}
+	if routeM > trackM {
+		return routeM
+	}
+	return trackM
+}
+
 func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) error {
 	ride, err := s.rides.GetByID(rideID)
 	if err != nil {
@@ -231,7 +250,21 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 	if ride.DriverID == nil || *ride.DriverID != driverID {
 		return ErrForbidden
 	}
-	distanceM, _ := s.rides.TrackDistanceM(rideID)
+	trackM, _ := s.rides.TrackDistanceM(rideID)
+	// F3 退路：GPS 軌跡里程可能為 0 或稀疏而偏低。有目的地座標且已注入 OSRM 時，
+	// 以 OSRM pickup→dropoff 路線里程作地板，計費里程取「軌跡 vs 路線」大者——
+	// 軌跡真的長於路線＝司機繞路，仍照實計；軌跡偏低則用路線里程補回。
+	routeM := -1
+	if s.osrm != nil && ride.DropoffPoint != nil {
+		_, routeM, _ = s.osrm.RouteDuration(ctx,
+			ride.PickupPoint.Lat, ride.PickupPoint.Lng,
+			ride.DropoffPoint.Lat, ride.DropoffPoint.Lng)
+	}
+	distanceM := billableDistanceM(trackM, routeM)
+	if routeM > trackM {
+		log.Info().Int64("ride_id", rideID).Int("track_m", trackM).Int("route_m", routeM).
+			Msg("計費里程改用 OSRM 路線里程（軌跡里程偏低）")
+	}
 
 	// 費率快照：完成當下依當前費率算好車資/手續費/實得，定格寫進本筆 ride。
 	// 未注入費率設定時（如部分測試）三者留 NULL，不影響完成流程。

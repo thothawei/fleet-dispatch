@@ -67,8 +67,9 @@ func (s *FeeSettings) MonthlyMembershipFeeCents() int64 {
 //	commission = round(fare × bps / 10000)
 //	driver_net = fare − commission
 //
-// 距離為 0（軌跡稀疏/缺失）時 fare 會落到 min_fare，不會算成 0；
-// 更精準的 OSRM pickup→dropoff 退路列為後續強化（見 docs/TODO.md F3）。
+// 距離為 0 時 fare 會落到 min_fare，不會算成 0；此外呼叫端（TrackingService.Complete）
+// 已對軌跡稀疏/缺失做退路——以 OSRM pickup→dropoff 路線里程作地板（見 billableDistanceM），
+// 故傳進來的 distanceM 通常已是「軌跡 vs 路線」的較大者。
 func (s *FeeSettings) Quote(distanceM int) (fareCents, commissionCents, driverNetCents int64) {
 	s.mu.RLock()
 	base, perKm, minFare, bps := s.baseFareCents, s.perKmFareCents, s.minFareCents, s.commissionBps
