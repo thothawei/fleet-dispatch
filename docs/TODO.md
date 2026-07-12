@@ -108,10 +108,10 @@
       報表 API 限制查詢跨度（如日報表單日、月報表單月、自訂區間上限 1 個月）；
       DB 連線設 `statement_timeout`，避免誤觸全表掃描拖垮線上。
 
-- [ ] **F9-5. 分頁與有界回傳**
-      任何「逐筆」列表（訂單明細等）一律 keyset/offset 分頁、禁止無上限回傳；
-      報表 API 只回**聚合列**（每司機一列，天然有界）。
-      （另補後端 `GET /api/admin/rides` 的 `offset`/日期區間，解掉 admin 現有「client-side 過濾最近 100 筆」的限制。）
+- [~] **F9-5. 分頁與有界回傳**
+      訂單列表 `GET /api/admin/rides` 已補 `offset`/日期區間/關鍵字＋回 `total`（dispatch#2），
+      admin 已改伺服器端分頁 ✅。**待補**：其餘「逐筆」列表全面 keyset/offset 化、禁無上限回傳的通盤檢查。
+      報表 API 已只回**聚合列**（每司機一列，天然有界）。
 
 - [x] **F9-6. 會費表防重複入帳** ✅（隨 F8 migration `000013`）
       `membership_invoices` 加 `UNIQUE(driver_id, period)`（`uq_membership_driver_period`）+
@@ -150,6 +150,18 @@
    F9-1~F9-7；`daily_driver_earnings` 彙總表與 rides 月分割屬「量體上升後」啟用，勿過早最佳化。
 
 ---
+
+## 下次任務
+
+計費地基 **F1–F8＋F3 OSRM 里程退路已全數合併進 main**，三端對帳與 F3 退路皆 docker E2E 驗過。剩餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
+
+1. **F9-3 預聚合彙總表 `daily_driver_earnings`**：完成時增量更新或每日 rollup，報表優先讀彙總表。
+2. **F9-4 查詢範圍上限 + `statement_timeout`**：報表 API 限制查詢跨度、DB 逾時保護。
+3. **F9-5（待補部分）**：其餘逐筆列表全面 keyset/offset 化的通盤檢查。
+4. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
+5. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。
+
+驗收前先 `EXPLAIN ANALYZE` 灌 50~100 萬筆確認走索引範圍掃描（見上「驗收方式」）。Git 走 PR（main 受保護 `enforce_admins: true`）。
 
 ## 參考
 

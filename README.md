@@ -41,8 +41,8 @@ REQUESTED(0) ─► ASSIGNED(1) ─► ACCEPTED(2) ─► PICKED_UP(3) ─► CO
 | 4 | **導航** | 接單成功 | 回傳 `https://www.google.com/maps/dir/?...` deep link，司機一點開啟手機 Google Maps 導航到上車點 |
 | 5 | **ETA 回報** | 司機位置更新 | OSRM 算「司機→上車點」實際路網時間，推播客戶「距您 X 公尺、約 Y 分鐘抵達」 |
 | 6 | **抵達／上車** | 司機進入上車點 100m | PostGIS `ST_DWithin` 電子圍籬自動判定抵達；司機按上車 → 訂單轉 `PICKED_UP`，開始記錄軌跡到 `ride_tracks` |
-| 7 | **下車／完成** | 司機按完成 | 訂單轉 `COMPLETED`，用 PostGIS `ST_Length` 由軌跡算總里程 |
-| 8 | **報表** | 隨時查詢 | 軌跡回放輸出 GeoJSON；日報表以 window/聚合查詢統計各司機趟數、里程、平均接客秒數 |
+| 7 | **下車／完成** | 司機按完成 | 訂單轉 `COMPLETED`，PostGIS `ST_Length` 由軌跡算里程；**計費里程取「軌跡 vs OSRM pickup→dropoff 路線」大者**（F3，軌跡稀疏時的退路），依當前費率算好車資／手續費／司機實得，**快照定格**寫進該筆 ride |
+| 8 | **報表** | 隨時查詢 | 軌跡回放輸出 GeoJSON；日／月報表聚合各司機趟數、里程、**營業額／手續費／應付總公司**（＝手續費＋月會費）；會費可產生 `membership_invoices` 帳單 |
 
 ---
 
@@ -77,8 +77,22 @@ docker compose --profile simulator up -d simulator
 | POST | `/api/rides/:id/pickup` | 客戶上車 |
 | POST | `/api/rides/:id/complete` | 完成行程 |
 | GET  | `/api/rides/:id/track` | 軌跡回放（GeoJSON Feature） |
-| GET  | `/api/reports/daily?date=YYYY-MM-DD` | 日報表 |
+| POST | `/api/customer/register` `login`、`POST /api/rides` | 乘客 App：註冊/登入、叫車（可帶 `dropoff_lat/lng`） |
+| GET  | `/api/driver/earnings?month=YYYY-MM` | 司機收入（趟數/營業額/手續費/實得/會費/應付總公司） |
 | GET  | `/liff/` | 司機 LIFF 定位頁 |
+
+**後台 `/api/admin/*`**（帳密登入，角色 viewer/dispatcher/superadmin）：
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| POST | `/api/admin/login` | 後台登入（種子 admin/admin） |
+| GET  | `/api/admin/rides?status=&limit=&offset=&from=&to=&q=` | 訂單列表（伺服器端分頁，回 `total`） |
+| GET/POST | `/api/admin/rides/:id`、`/api/admin/rides/:id/cancel` | 訂單詳情（軌跡+事件）／強制取消 |
+| GET/PATCH | `/api/admin/drivers`、`/api/admin/drivers/:id/status` | 司機列表／啟停 |
+| GET  | `/api/admin/reports/daily?date=`、`/reports/monthly?month=` | 日／月報表（含金額） |
+| GET/PUT | `/api/admin/settings/dispatch`、`/api/admin/settings/fees` | 派單參數／費率設定（費率限 superadmin） |
+| GET/POST/PATCH | `/api/admin/membership-invoices[...]` | 會費帳單：列表／產生／標記已繳 |
+| GET/POST/PATCH | `/api/admin/admins[...]` | 後台帳號管理（superadmin） |
 
 ---
 
@@ -88,8 +102,13 @@ docker compose --profile simulator up -d simulator
 |----|------|----------|
 | `drivers`   | 司機、狀態（離線/待命/載客中） | — |
 | `customers` | 客戶（依 LINE userId 唯一） | — |
-| `rides`     | 訂單狀態機、上/下車點、里程、ETA | `pickup_point` / `dropoff_point` `geography(Point,4326)` |
+| `rides`     | 訂單狀態機、上/下車點、里程、ETA、**計費快照**（`fare_amount_cents`／`commission_amount_cents`／`driver_net_amount_cents`） | `pickup_point` / `dropoff_point` `geography(Point,4326)` |
 | `ride_tracks` | 行程軌跡（按月分區） | `location geography(Point,4326)` |
+| `fleet_settings` | 費率設定單列（起步價/每公里/最低車資/手續費 bps/月會費，金額存分） | — |
+| `membership_invoices` | 會費帳單（每司機每月一張，金額快照、`UNIQUE(driver_id, period)` 防重複） | — |
+| `admins` | 後台帳號（角色 viewer/dispatcher/superadmin） | — |
+
+**計費設計**：金額全系統存「分」（整數，避免浮點），手續費存 bps（1500=15%）。車資／手續費在**行程完成當下依當前費率算好、快照定格**寫進該筆 ride，日後調費率不影響歷史帳。詳見 [docs/TODO.md](docs/TODO.md)「F. 手續費／會費／營運報表」。
 
 Redis 鍵：`drivers:geo`（GEO 位置集合）、`driver:{id}:loc`（最新位置+時間戳）、`ride:{id}:lock`（搶單鎖，30s TTL）、`ratelimit:{lineUserId}`（叫車限流）。
 
