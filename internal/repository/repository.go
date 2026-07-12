@@ -576,6 +576,73 @@ func (r *FeeSettingsRepository) Update(s *model.FleetSettings) error {
 		}).Error
 }
 
+// MembershipInvoiceRepository 會費帳單讀寫（F8）。
+type MembershipInvoiceRepository struct {
+	db *gorm.DB
+}
+
+func NewMembershipInvoiceRepository(db *gorm.DB) *MembershipInvoiceRepository {
+	return &MembershipInvoiceRepository{db: db}
+}
+
+// GenerateForMonth 為「當月有完成行程的司機」各產生一筆會費帳單（冪等）。
+// amountCents 為產生當下的月會費快照；同司機同月已存在的帳單不會被覆寫（ON CONFLICT DO NOTHING），
+// 故重跑安全、只補新活躍司機。回傳新建筆數。period 為 YYYY-MM。
+func (r *MembershipInvoiceRepository) GenerateForMonth(period string, amountCents int64) (int64, error) {
+	monthStart := period + "-01"
+	// SELECT-list 的 ? 需顯式轉型：pgx 預設把裸參數綁為 text，Postgres 不會自動把
+	// text 塞進 bigint 欄位（amount_cents），故對 period/amount 明確 cast。
+	res := r.db.Exec(`
+		INSERT INTO membership_invoices (driver_id, period, amount_cents, status, created_at, updated_at)
+		SELECT DISTINCT r.driver_id, ?::text, ?::bigint, 'unpaid', NOW(), NOW()
+		FROM rides r
+		WHERE r.status = ? AND r.driver_id IS NOT NULL
+		  AND r.completed_at >= ?::date
+		  AND r.completed_at < (?::date + INTERVAL '1 month')
+		ON CONFLICT (driver_id, period) DO NOTHING
+	`, period, amountCents, constants.RideStatusCompleted, monthStart, monthStart)
+	return res.RowsAffected, res.Error
+}
+
+// MembershipInvoiceRow 帳單列（含司機名），供後台顯示。
+type MembershipInvoiceRow struct {
+	ID          int64      `json:"id"`
+	DriverID    int64      `json:"driver_id"`
+	DriverName  string     `json:"driver_name"`
+	Period      string     `json:"period"`
+	AmountCents int64      `json:"amount_cents"`
+	Status      string     `json:"status"`
+	PaidAt      *time.Time `json:"paid_at"`
+}
+
+// List 依 period（必填）與 status（選填 unpaid/paid，空字串為全部）列帳單。
+func (r *MembershipInvoiceRepository) List(period, status string) ([]MembershipInvoiceRow, error) {
+	var rows []MembershipInvoiceRow
+	err := r.db.Raw(`
+		SELECT mi.id, mi.driver_id, d.name AS driver_name, mi.period,
+		       mi.amount_cents, mi.status, mi.paid_at
+		FROM membership_invoices mi
+		JOIN drivers d ON d.id = mi.driver_id
+		WHERE mi.period = ? AND (? = '' OR mi.status = ?)
+		ORDER BY mi.driver_id
+	`, period, status, status).Scan(&rows).Error
+	return rows, err
+}
+
+// SetPaid 標記帳單為已繳/未繳（含 paid_at）。回傳是否更新到（找不到 id 回 false）。
+func (r *MembershipInvoiceRepository) SetPaid(id int64, paid bool) (bool, error) {
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	if paid {
+		updates["status"] = "paid"
+		updates["paid_at"] = time.Now()
+	} else {
+		updates["status"] = "unpaid"
+		updates["paid_at"] = nil
+	}
+	res := r.db.Model(&model.MembershipInvoice{}).Where("id = ?", id).Updates(updates)
+	return res.RowsAffected > 0, res.Error
+}
+
 func (r *RideRepository) IsWithinPickup(id int64, lat, lng float64, radiusM float64) (bool, error) {
 	var within bool
 	err := r.db.Raw(`

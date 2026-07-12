@@ -21,25 +21,31 @@ import (
 
 // AdminHandler 後台 API + 登入
 type AdminHandler struct {
-	admins           *service.AdminRegistry
-	adminOps         *service.AdminOperations
-	dispatchSettings *service.DispatchSettings
-	drivers          *repository.DriverRepository
-	rides            *repository.RideRepository
-	tracks           *repository.TrackRepository
-	rideEvents       *repository.RideEventRepository
-	reports          *repository.ReportRepository
-	adminRepo        *repository.AdminRepository
-	adminUsers       *service.AdminUsers
-	feeSettings      *service.FeeSettings
-	redis            *redisstore.Store
-	jwtSecret        string
-	jwtExpiryHours   int
+	admins             *service.AdminRegistry
+	adminOps           *service.AdminOperations
+	dispatchSettings   *service.DispatchSettings
+	drivers            *repository.DriverRepository
+	rides              *repository.RideRepository
+	tracks             *repository.TrackRepository
+	rideEvents         *repository.RideEventRepository
+	reports            *repository.ReportRepository
+	adminRepo          *repository.AdminRepository
+	adminUsers         *service.AdminUsers
+	feeSettings        *service.FeeSettings
+	membershipInvoices *repository.MembershipInvoiceRepository
+	redis              *redisstore.Store
+	jwtSecret          string
+	jwtExpiryHours     int
 }
 
 // SetFeeSettings 注入費率設定服務（供 /settings/fees 讀寫）；可選。
 func (h *AdminHandler) SetFeeSettings(fs *service.FeeSettings) {
 	h.feeSettings = fs
+}
+
+// SetMembershipInvoices 注入會費帳單 repo（供 /membership-invoices）；可選。
+func (h *AdminHandler) SetMembershipInvoices(repo *repository.MembershipInvoiceRepository) {
+	h.membershipInvoices = repo
 }
 
 func NewAdminHandler(
@@ -381,6 +387,84 @@ func (h *AdminHandler) PutFeeSettings(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, h.feeSettings.JSON())
+}
+
+// GenerateMembershipInvoices POST /api/admin/membership-invoices/generate?month=YYYY-MM（superadmin）
+// 為當月有完成行程的司機各產生一筆會費帳單（冪等，重跑只補新活躍司機）。
+func (h *AdminHandler) GenerateMembershipInvoices(c *gin.Context) {
+	if h.membershipInvoices == nil || h.feeSettings == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "會費帳單未啟用"})
+		return
+	}
+	month := c.Query("month")
+	if _, err := time.Parse(reportMonthLayout, month); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "month 需為 YYYY-MM 格式"})
+		return
+	}
+	amount := h.feeSettings.MonthlyMembershipFeeCents()
+	created, err := h.membershipInvoices.GenerateForMonth(month, amount)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"month": month, "created": created, "amount_cents": amount})
+}
+
+// ListMembershipInvoices GET /api/admin/membership-invoices?month=YYYY-MM&status=unpaid（viewer）
+func (h *AdminHandler) ListMembershipInvoices(c *gin.Context) {
+	if h.membershipInvoices == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "會費帳單未啟用"})
+		return
+	}
+	month := c.Query("month")
+	if _, err := time.Parse(reportMonthLayout, month); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "month 需為 YYYY-MM 格式"})
+		return
+	}
+	status := c.Query("status")
+	if status != "" && status != "paid" && status != "unpaid" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status 僅接受 paid / unpaid"})
+		return
+	}
+	rows, err := h.membershipInvoices.List(month, status)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if rows == nil {
+		rows = []repository.MembershipInvoiceRow{}
+	}
+	c.JSON(http.StatusOK, gin.H{"month": month, "invoices": rows})
+}
+
+// MarkMembershipInvoicePaid PATCH /api/admin/membership-invoices/:id — body {"paid": true/false}（superadmin）
+func (h *AdminHandler) MarkMembershipInvoicePaid(c *gin.Context) {
+	if h.membershipInvoices == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "會費帳單未啟用"})
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	var req struct {
+		Paid *bool `json:"paid"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Paid == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "請提供 paid（true/false）"})
+		return
+	}
+	ok, err := h.membershipInvoices.SetPaid(id, *req.Paid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "找不到帳單"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": id, "paid": *req.Paid})
 }
 
 // CancelRide POST /api/admin/rides/:id/cancel — 後台強制取消

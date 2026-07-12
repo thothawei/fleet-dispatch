@@ -69,9 +69,14 @@
       `GET /api/driver/earnings?month=YYYY-MM`（driver JWT，`DriverHandler.Earnings`）：
       回傳趟數／營業額／手續費／實得／本月會費／應付總公司；無趟數則不收會費。
 
-- [ ] **F8.（Phase 2）會費落帳 `membership_invoices`**
-      `driver_id`、`period_year_month`、`amount`、`status`（未繳/已繳）、`paid_at`。
-      需要「已繳/未繳」管理與催繳時才開；F6 先以即時計算滿足報表顯示。
+- [x] **F8. 會費落帳 `membership_invoices`** ✅（migration `000013`）
+      表：`driver_id`、`period`（YYYY-MM）、`amount_cents`（產生時定格快照）、
+      `status`（unpaid/paid）、`paid_at`。`MembershipInvoiceRepository`：
+      `GenerateForMonth`（對當月有完成行程的司機各開一張，`ON CONFLICT DO NOTHING` 冪等）、
+      `List(period,status)`、`SetPaid`。API：`POST /api/admin/membership-invoices/generate`
+      與 `PATCH /api/admin/membership-invoices/:id`（superadmin）、`GET /api/admin/membership-invoices`（viewer）。
+      **語意**：只對「當月有完成行程」的司機開帳單，與 F6/F7「無跑車不收會費」一致；金額為產生當下快照，
+      日後改月會費不影響歷史帳單。**注意**：F6 月報表仍即時算會費（live view），與已落帳的 invoice 為兩個視角。
 
 ### 大資料量預防措施（DB scale，2026-07-11 納入）
 
@@ -104,9 +109,10 @@
       報表 API 只回**聚合列**（每司機一列，天然有界）。
       （另補後端 `GET /api/admin/rides` 的 `offset`/日期區間，解掉 admin 現有「client-side 過濾最近 100 筆」的限制。）
 
-- [ ] **F9-6. 會費表防重複入帳**（搭配 F8）
-      `membership_invoices` 加 `UNIQUE(driver_id, period_year_month)` + 該複合索引，
-      避免月結排程重跑造成重複帳。
+- [x] **F9-6. 會費表防重複入帳** ✅（隨 F8 migration `000013`）
+      `membership_invoices` 加 `UNIQUE(driver_id, period)`（`uq_membership_driver_period`）+
+      `(period, status)` 索引；`GenerateForMonth` 以 `ON CONFLICT DO NOTHING` 保證月結重跑不重複帳。
+      整合測試 `TestMembershipInvoices` 已驗冪等與金額快照。
 
 - [ ] **F9-7.（Phase 2）rides 月分割**
       量體達千萬級時，`rides` 依 `completed_at` 做 PostgreSQL declarative partitioning
