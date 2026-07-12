@@ -1,6 +1,6 @@
 # 派車系統 — 工作狀態與待辦清單
 
-> 最後更新：2026-07-08（debug 複查 + smoke_test 同步）。此檔記錄「雙端 App + 後台」擴張的整體進度，跨三個 repo。
+> 最後更新：2026-07-12（手續費／會費／報表子系統 + 訂單伺服器端分頁 + antd deprecation 清理收尾）。此檔記錄「雙端 App + 後台」擴張的整體進度，跨三個 repo。
 > 總體設計見 [dual-client design](superpowers/specs/2026-07-06-fleet-dual-client-design.md)；
 > **可執行的缺口清單**見 [2026-07-07-gap-analysis-plan.md](2026-07-07-gap-analysis-plan.md)（§0.1 有 2026-07-08 複查更新）與 [backend-api-gaps.md](backend-api-gaps.md)。
 
@@ -12,7 +12,7 @@
 | 後台前端 line-fleet-admin | `~/Documents/line-fleet-admin` | `github.com/thothawei/fleet-frontEnd` | 已 push |
 | 雙端 App line-fleet-app | `~/Documents/line-fleet-app` | `github.com/thothawei/fleet-app` | 已 push |
 
-git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（push 用 repo 內 `core.sshCommand` 指定的 thothawei 金鑰）。
+git 慣例（2026-07-10 起）：三 repo 的 `main` **受 branch protection 保護、不可直推**，一律開分支 → `gh pr create` → 等 CI 綠 → `gh pr merge --squash --delete-branch`。詳見下方「Git 工作流」。（push 用 repo 內 `core.sshCommand` 指定的 thothawei 金鑰。）
 
 ## 已完成
 
@@ -41,9 +41,18 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
 - 端到端：乘客下單 dropoff → 司機上車後導航去目的地，已通（LINE 叫車仍無目的地，屬設計取捨）。
 
 ### 後台前端（line-fleet-admin，React+TS+Vite）
-- 頁面：登入、即時車隊地圖（MapLibre + WS）、訂單列表、**訂單詳情 + 軌跡回放**（commit 1702fec）、司機列表、日報表。
-- Ant Design(zh_TW) + TanStack Query + axios(JWT) + react-router 受保護路由；`npm start` 一鍵開前後端。
-- 路由 lazy import 已拆包（maplibre 單 chunk 仍 >500KB，屬警告非阻塞）。
+- 頁面：登入、營運總覽 Dashboard、即時車隊地圖（MapLibre + WS，marker 連司機詳情）、訂單列表（**伺服器端分頁/日期/關鍵字**）＋**訂單詳情+軌跡回放**、司機列表（搜尋/篩選）＋司機詳情、日報表、**月營運報表**、派單參數、**費率設定**、使用者管理。
+- Ant Design(zh_TW，v6 deprecation 全清、message/Modal 走 `App.useApp()`) + TanStack Query + axios(JWT `exp` 主動登出) + react-router（`RequireAuth`/`RequireRole`）；全域 Error Boundary、統一 `apiError`、Skeleton 載入；`npm start` 一鍵開前後端。
+- Vitest 22 檔 92 tests、CI（lint→test→build）綠；路由 lazy import 拆包（maplibre 單 chunk >500KB 屬警告非阻塞）。
+
+### 手續費／會費／營運報表（2026-07-11~12，跨三端，皆已合併進 main）
+> 需求：後台設手續費%、報表顯示司機營業額與應付總公司、車隊會費。設計定案與逐項見各 repo `docs/TODO.md`。
+- **後端 F1–F8（line-fleet-dispatch）**：`fleet_settings` 費率表（migration 000011）、rides 加計費快照欄位（000012）、完成時依當前費率快照定格計費（金額存分、手續費存 bps）、費率設定 API（superadmin）、日/月報表加金額、司機收入 API、會費落帳 `membership_invoices`（000013，`UNIQUE(driver_id,period)` 防重複）。
+- **F3 OSRM 里程退路（2026-07-12）**：完成計費里程＝`max(GPS 軌跡里程, OSRM pickup→dropoff 路線里程)`，軌跡 0/稀疏時用路線里程補回。docker E2E：track_m=0→route_m=6263→fare NT$210.26（非 min_fare 8500）。
+- **F9 大資料量預防**：F9-1 sargable 範圍查詢+複合索引、F9-2 加總防溢位、F9-6 會費防重複入帳已做；F9-3/4/7 與 F9-5 通盤化留「量體上升後」。
+- **後台 G1–G3（line-fleet-admin）**：費率設定頁、日報表金額欄、月營運報表頁（應付總公司+CSV）。
+- **App E1–E2（line-fleet-app）**：司機收入頁（月切換、應付總公司）、乘客完成卡顯示車資。
+- **三端對帳**：`driver/earnings`（app 來源）==`reports/monthly`（admin 來源）逐欄相同、admin UI 逐欄一致、快照制驗過——**app E1 ↔ admin G3 ↔ 後端 F6/F7 三端金額全對齊**。
 
 ## 待補強（2026-07-08 盤點，依優先序）
 
@@ -68,22 +77,19 @@ git 慣例：fleet 三 repo 直接在 `main` 開發、commit 後直接 push（pu
    三層角色 viewer/dispatcher/superadmin（migration `000010` 加 `role`/`is_active` + CHECK）；`AdminAuth` 改查 DB（停用即時生效）+ `RequireAdminRole` 分級；
    帳號管理 API `/api/admin/admins`（superadmin，防鎖死 **FOR UPDATE** 交易）+ `/api/admin/me`；前端（line-fleet-admin）bootstrap 補 role、路由守衛、使用者管理頁、viewer 寫入降級。
    端到端 curl 驗證分級/停用即時失效/防自我鎖死全通過。
-10. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D7 Phase C 計費/評分/金流/metrics。Maps API key／真 FCM 屬外部依賴。
+10. **延後**：A5 iOS build（需完整 Xcode + CocoaPods）；D7 Phase C 中**計費已於 2026-07-11~12 完成**（見上「手續費／會費／營運報表」），剩評分/金流/metrics。Maps API key／真 FCM 屬外部依賴。
 
 ## 下次任務
 
-1. ~~**開 main 分支保護**~~：✅ 2026-07-10，三個 repo 都已設定（見下方「Git 工作流」）。
-2. **座標導航 E2E**：`docker compose up` 後跑 `scripts/smoke_test.sh`，確認 pickup 回應含 `dropoff_lat/lng`；
-   再配 App 模擬器驗司機端「導航去目的地」開出的是座標而非地址。
+> 2026-07-11~12 收尾：手續費／會費／報表三端（F1–F8、G1–G3、E1–E2）＋F3 里程退路＋訂單伺服器端分頁＋
+> antd v6 deprecation 全清，皆已合併進 main。以下多屬外部依賴或「量體上升後才需」：
+
+1. ~~座標導航 E2E~~ ✅ 2026-07-11：App 模擬器驗證司機端「導航去目的地」開出的是座標而非地址（`dumpsys` 攔 intent `query=lat,lng`）。
+2. ~~後端訂單查詢 API + 前端伺服器端分頁~~ ✅ 2026-07-11：`GET /api/admin/rides` 的 `offset`/`from`/`to`/`q`/`total`，admin 已改伺服器端分頁。
 3. **E3 生產部署 / E4 監控**（尚未開始，DevOps 剩下的兩項）。
-4. ~~**後台前端剩餘小項**（line-fleet-admin）~~：✅ 2026-07-10。Token 過期處理（JWT `exp`）、
-   日期篩選／關鍵字搜尋、匯出 CSV、全域 Error Boundary、README 版本校正皆完成；
-   lint + tsc + 76 tests + build 全綠，另跑 Playwright 對真後端做 15 項真瀏覽器驗收。
-5. ~~**後端補訂單查詢 API**~~：✅ 2026-07-10。`GET /api/admin/rides` 新增 `offset`、`from`/`to`
-   （依 `requested_at`，含頭尾）、`q`（上車點 `ILIKE` 或訂單 ID 子字串），回應加 `total`／`limit`／`offset`。
-   `RideRepository.List(RideListFilter)` 回 `(rows, total, err)`；`ListRecent` 保留為薄包裝。
-   契約詳見 [backend-api-gaps.md](backend-api-gaps.md) #15。
-   **仍待**：後台前端（line-fleet-admin）把 client-side 過濾改成伺服器端查詢＋分頁器。
+4. **F9-3/F9-4/F9-7（量體上升後才需）**：預聚合彙總表、查詢範圍上限+`statement_timeout`、rides 月分割。灌 50~100 萬筆 `EXPLAIN ANALYZE` 驗索引後再做。
+5. **外部依賴**：Maps API key（乘客端地圖版 B2/B3 實測）、真 FCM/APNs + Firebase 專案（A2 真裝置推播）、A5 iOS build（Xcode+CocoaPods）。
+6. **會費帳單 UI**（後端 F8 已就緒）：admin `membership_invoices` 列表／產生／標記已繳畫面。
 
 ## Git 工作流（2026-07-10 起）
 
