@@ -7,3 +7,6 @@ bin/
 dist/
 *.log
 .DS_Store
+
+# Cursor IDE 的本機 agent 規則/設定（各人自留，勿進版控）
+.cursor/
