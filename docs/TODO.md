@@ -34,7 +34,7 @@
 > **實作進度（2026-07-11）**：F1–F7、F9-1、F9-2 已完成並過測試（build/vet 綠、
 > 費率單元測試 6 案、testcontainers 整合測試 `TestBillingReports`/`TestCompleteRideSnapshotsFare`
 > 對真 Postgres 跑全 migration 通過）。命名實作採 `*_cents`（金額存分）、`commission_bps`
-> （手續費存基點，避免浮點）。**唯一暫緩**：F3 的 OSRM 里程退路（見下）。
+> （手續費存基點，避免浮點）。F3 的 OSRM 里程退路已於 2026-07-12 補上（見下）。
 
 - [x] **F1. 費率設定表 `fleet_settings`**（migration `000011`）✅
       單列表（`id` 固定 1），欄位 `base_fare_cents`／`per_km_fare_cents`／`min_fare_cents`／
@@ -49,8 +49,12 @@
       里程 → `FeeSettings.Quote()`（`internal/service/fee_settings.go`，全整數運算）→
       定格寫進 ride；同時把 `fare_amount_cents` 塞進乘客 `ride.completed` 事件（為 E2 鋪路）。
       只有 `COMPLETED` 計費。
-      **暫緩**：`distance_m == 0` 目前用 `min_fare` 樓地板擋「算成 0」，但中段里程軌跡稀疏仍會偏低；
-      OSRM pickup→dropoff 退路尚未接（需把 OSRM/ETA 注入 TrackingService），留待強化。
+      **OSRM 里程退路（2026-07-12）✅**：`TrackingService` 注入 OSRM client（`SetOSRM`），
+      完成時**計費里程＝max(GPS 軌跡里程, OSRM pickup→dropoff 路線里程)**（`billableDistanceM`）——
+      軌跡真的長於路線＝司機繞路照實計；軌跡 0/稀疏偏低則用路線里程補回。存進 `distance_m` 讓報表與車資一致。
+      需有 dropoff 座標才觸發退路（LINE 建的無目的地訂單維持軌跡里程）。OSRM 不可用時 client 內建 haversine×1.4 退路。
+      驗收：單元測試 `TestBillableDistanceM`（8 案 max 邏輯）+ docker E2E（稀疏軌跡 track_m=0 → route_m=6263 →
+      fare 21026 分＝NT$210.26，非 min_fare 8500）。
 
 - [x] **F4. 費率設定 API**（superadmin）✅
       `GET/PUT /api/admin/settings/fees`（`AdminHandler.GetFeeSettings`/`PutFeeSettings`），
@@ -137,8 +141,8 @@
 
 ### 風險與待拍板細項
 
-1. **里程準確度**：計費綁 GPS 軌跡里程，軌跡稀疏會少算。已規劃 OSRM／`min_fare` 退路；
-   是否再加「後台可手動校正單筆車資」待定。
+1. **里程準確度**：計費綁 GPS 軌跡里程，軌跡稀疏會少算——已補 OSRM pickup→dropoff 路線里程退路（F3，2026-07-12），
+   計費里程取軌跡與路線大者；`min_fare` 仍是最後地板。是否再加「後台可手動校正單筆車資」待定。
 2. **費率調整時機**：快照制 → 改費率只影響之後的行程，歷史不變（刻意）。
 3. **會費落帳**：F6 先即時算，不管已繳/未繳；要狀態管理再開 F8。
 4. **取消行程不計費**：只有 `COMPLETED` 計車資與手續費。
