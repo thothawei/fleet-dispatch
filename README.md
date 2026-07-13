@@ -79,6 +79,11 @@ docker compose --profile simulator up -d simulator
 | GET  | `/api/rides/:id/track` | 軌跡回放（GeoJSON Feature） |
 | POST | `/api/customer/register` `login`、`POST /api/rides` | 乘客 App：註冊/登入、叫車（可帶 `dropoff_lat/lng`） |
 | GET  | `/api/driver/earnings?month=YYYY-MM` | 司機收入（趟數/營業額/手續費/實得/會費/應付總公司） |
+| GET/POST | `/api/rides/:id/messages?after=` | 行程內對話：歷史／發話（僅本趟乘客/司機；即時遞送走 WS `chat.message`） |
+| POST | `/api/rides/:id/lost-items` | 乘客對已完成行程建遺失物協尋單（處理費＝車資×%，建單快照） |
+| GET  | `/api/rides/:id/lost-items` | 查該行程最新協尋單（本趟乘客/司機/admin） |
+| GET  | `/api/customer/lost-items`、`/api/driver/lost-items` | 乘客／司機的未結案協尋清單 |
+| POST | `/api/lost-items/:id/found` `pay` `return` `close` | 協尋狀態機：司機尋獲→乘客付處理費→司機歸還；未尋獲可結案 |
 | GET  | `/liff/` | 司機 LIFF 定位頁 |
 
 **後台 `/api/admin/*`**（帳密登入，角色 viewer/dispatcher/superadmin）：
@@ -104,8 +109,10 @@ docker compose --profile simulator up -d simulator
 | `customers` | 客戶（依 LINE userId 唯一） | — |
 | `rides`     | 訂單狀態機、上/下車點、里程、ETA、**計費快照**（`fare_amount_cents`／`commission_amount_cents`／`driver_net_amount_cents`） | `pickup_point` / `dropoff_point` `geography(Point,4326)` |
 | `ride_tracks` | 行程軌跡（按月分區） | `location geography(Point,4326)` |
-| `fleet_settings` | 費率設定單列（起步價/每公里/最低車資/手續費 bps/月會費，金額存分） | — |
+| `fleet_settings` | 費率設定單列（起步價/每公里/最低車資/手續費 bps/月會費/遺失物處理費 bps，金額存分） | — |
 | `membership_invoices` | 會費帳單（每司機每月一張，金額快照、`UNIQUE(driver_id, period)` 防重複） | — |
+| `ride_messages` | 乘客↔司機行程內對話（WS 即時遞送的歷史真源） | — |
+| `lost_item_requests` | 遺失物協尋單（處理費快照、狀態機 open→found→paid→returned/closed、部分唯一索引擋重複未結案單） | — |
 | `admins` | 後台帳號（角色 viewer/dispatcher/superadmin） | — |
 
 **計費設計**：金額全系統存「分」（整數，避免浮點），手續費存 bps（1500=15%）。車資／手續費在**行程完成當下依當前費率算好、快照定格**寫進該筆 ride，日後調費率不影響歷史帳。詳見 [docs/TODO.md](docs/TODO.md)「F. 手續費／會費／營運報表」。

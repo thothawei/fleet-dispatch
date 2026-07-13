@@ -164,13 +164,47 @@
 
 ---
 
+## H. 對話與遺失物協尋（2026-07-13 實作）
+
+> 需求：會員（乘客）與司機**即時**對話（WebSocket 推播，非留言板）；乘客弄丟東西可對
+> 已完成行程建協尋單聯絡司機，並支付「找回處理費」——費用＝該趟車資 × 處理費%，
+> % 由後台費率設定頁調整（`lost_item_fee_bps`），金額於**建單當下快照**（同車資快照制）。
+
+- [x] **H1. 行程內對話**（migration `000015` `ride_messages`）
+      `ChatService`：訊息持久化後經 WS Hub 即時推 `chat.message` 給行程雙方；
+      `GET/POST /api/rides/:id/messages`（MultiAuth——本趟乘客/司機可發話、admin 唯讀稽核；
+      `after` 參數供斷線重連補漏）。長度限制 500 rune（DB CHECK ≤1000 為最後防線）。
+- [x] **H2. 遺失物協尋**（migration `000016` `lost_item_requests` + `fleet_settings.lost_item_fee_bps`）
+      `LostItemService`：乘客對已完成行程建單（`fee_cents = round(車資 × bps / 10000)` 快照）；
+      狀態機 open→found（司機尋獲）→paid（乘客付處理費，記帳式）→returned（歸還結案），
+      open/found 可 closed（未尋獲/取消）；守門式 UPDATE 防競態；部分唯一索引
+      `uq_lost_item_ride_active` 擋同行程重複未結案單（結案後可再開）。
+      `lost_item.created`/`lost_item.updated` 即時推播行程雙方。
+- [x] **H3. 處理費%設定**：`GET/PUT /api/admin/settings/fees` 帶 `lost_item_fee_bps`
+      （superadmin；預設 1000＝10%，0~10000 驗證）。
+- 驗收：整合測試 `TestChatSendAndList`、`TestLostItemFlow`（testcontainers 真 Postgres）；
+  **live E2E 30/30 ✅（2026-07-13，docker db/redis + 本機 server + gorilla/websocket 雙連線）**：
+  完整行程中乘客↔司機互傳訊息，**對方 WS 於微秒級收到 `chat.message`**（非輪詢）；
+  歷史 2 則、`after` 增量補讀 1 則；路人發話/讀史/查協尋皆 403；
+  協尋單 fee＝車資×10% 快照、admin 調成 20% 後**既有單凍結、新單吃新費率**；
+  重複建單 409、open 付款 409、paid 後 close 409；found→paid（帶 paid_at）→returned 全鏈路；
+  司機工作清單即時反映。驗畢費率還原、環境清除。
+  另注意：本機 `go test ./...` 因 service 套件整合測試逾 10 分鐘，需 `-timeout 30m`
+  （CI 只跑非 Docker 白名單，不受影響）。
+- **Phase 2（未做）**：付款目前為記帳式確認（無金流）；admin 後台的協尋單總覽列表頁；
+  聊天訊息的推播通知（FCM，App 被殺時）。
+
+---
+
 ## 下次任務
 
 計費地基 **F1–F8＋F3 里程退路＋F9-1~F9-6 已全數合併進 main**，三端對帳與 F3/F9-3/F9-4 皆 docker E2E 驗過。剩餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
 
-1. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
-2. **drivers／membership 真分頁**：逼近 `MaxListRows=5000` 上限時，比照 rides 改 offset/keyset 伺服器端分頁（含前端）。
-3. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。
+1. **協尋/對話 Phase 2**：遺失物處理費真金流（目前記帳式確認）；admin 協尋單總覽頁；
+   聊天訊息 FCM 推播（App 被殺時）與 admin 對話稽核 UI。
+2. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
+3. **drivers／membership 真分頁**：逼近 `MaxListRows=5000` 上限時，比照 rides 改 offset/keyset 伺服器端分頁（含前端）。
+4. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。
 
 驗收前先 `EXPLAIN ANALYZE` 灌 50~100 萬筆確認走索引範圍掃描（見上「驗收方式」）。Git 走 PR（main 受保護 `enforce_admins: true`）。
 
