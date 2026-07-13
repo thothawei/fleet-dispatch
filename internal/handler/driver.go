@@ -89,19 +89,16 @@ func (h *DriverHandler) Earnings(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// 會費：當月有完成行程才收；應付總公司 = 手續費 + 月會費。
-	var membership int64
-	if h.feeSettings != nil && e.TripCount > 0 {
-		membership = h.feeSettings.MonthlyMembershipFeeCents()
-	}
+	// 會費以 membership_invoices 帳本快照為單一真源（repo 讀出），不再用即時費率——
+	// 未產生帳單者為 0；應付總公司 = 手續費 + 帳本會費。與月報表 F6 同源、不會分歧。
 	c.JSON(http.StatusOK, gin.H{
 		"month":                  month,
 		"trip_count":             e.TripCount,
 		"total_revenue_cents":    e.TotalRevenueCents,
 		"total_commission_cents": e.TotalCommissionCents,
 		"driver_net_cents":       e.DriverNetCents,
-		"membership_fee_cents":   membership,
-		"owed_to_hq_cents":       e.TotalCommissionCents + membership,
+		"membership_fee_cents":   e.MembershipFeeCents,
+		"owed_to_hq_cents":       e.TotalCommissionCents + e.MembershipFeeCents,
 	})
 }
 

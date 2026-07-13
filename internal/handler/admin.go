@@ -294,19 +294,12 @@ func (h *AdminHandler) MonthlyReport(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "month 需為 YYYY-MM 格式"})
 		return
 	}
+	// 會費/應付總公司由 repo 讀 membership_invoices 帳本快照補上（單一真源），
+	// 不再用即時費率——避免調費率追溯竄改已結清月份、與帳本失同步。未產生帳單者會費為 0。
 	rows, err := h.reports.MonthlyDriverStats(month)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	// 會費：當月有完成行程的司機各計一筆月會費；應付總公司 = 手續費 + 月會費。
-	var membership int64
-	if h.feeSettings != nil {
-		membership = h.feeSettings.MonthlyMembershipFeeCents()
-	}
-	for i := range rows {
-		rows[i].MembershipFeeCents = membership
-		rows[i].OwedToHqCents = rows[i].TotalCommissionCents + membership
 	}
 	if rows == nil {
 		rows = []repository.MonthlyDriverReport{}
