@@ -16,6 +16,9 @@ type Config struct {
 	DBName     string
 	DBUser     string
 	DBPassword string
+	// DBStatementTimeoutMs 每條 SQL 的執行上限（毫秒），交由 Postgres 逾時中止，
+	// 防跑飛的全表掃描拖垮線上（F9-4）。0 表示不設限。僅套用於 app 連線，migrations 不受影響。
+	DBStatementTimeoutMs int
 
 	RedisAddr string
 
@@ -58,6 +61,7 @@ func Load() (*Config, error) {
 		DBName:                  getEnv("DB_NAME", "fleet"),
 		DBUser:                  getEnv("DB_USER", "fleet"),
 		DBPassword:              getEnv("DB_PASSWORD", "change_me"),
+		DBStatementTimeoutMs:    getEnvInt("DB_STATEMENT_TIMEOUT_MS", 10000),
 		RedisAddr:               getEnv("REDIS_ADDR", "localhost:6379"),
 		LineChannelSecret:       getEnv("LINE_CHANNEL_SECRET", ""),
 		LineChannelAccessToken:  getEnv("LINE_CHANNEL_ACCESS_TOKEN", ""),
@@ -87,10 +91,16 @@ func Load() (*Config, error) {
 }
 
 func (c *Config) DSN() string {
-	return fmt.Sprintf(
+	dsn := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable TimeZone=Asia/Taipei",
 		c.DBHost, c.DBPort, c.DBUser, c.DBPassword, c.DBName,
 	)
+	// statement_timeout 為未知連線參數，pgx 會當成 runtime GUC 於連線建立時套用，
+	// 使每條 SQL 超時即被 Postgres 中止（F9-4）。migrations 走 MigrateDSN 不受影響。
+	if c.DBStatementTimeoutMs > 0 {
+		dsn += fmt.Sprintf(" statement_timeout=%d", c.DBStatementTimeoutMs)
+	}
+	return dsn
 }
 
 // MigrateDSN golang-migrate 使用的 postgres URL 格式

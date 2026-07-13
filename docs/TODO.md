@@ -104,9 +104,13 @@
       主鍵 `(driver_id, day)`。完成行程時增量更新，或每日排程 rollup。
       報表優先讀彙總表，原始 `rides` 僅供稽核/回溯，避免每次即時 GROUP BY 全表。
 
-- [ ] **F9-4. 查詢範圍上限 + 逾時保護**
-      報表 API 限制查詢跨度（如日報表單日、月報表單月、自訂區間上限 1 個月）；
-      DB 連線設 `statement_timeout`，避免誤觸全表掃描拖垮線上。
+- [x] **F9-4. 查詢範圍上限 + 逾時保護** ✅（2026-07-13）
+      **查詢跨度上限**：`parseRideListFilter` 對 `from`~`to` 自訂區間加 `rideListMaxRangeDays=31`（含頭尾）上限，
+      超過回 `400 查詢區間不可超過 31 天`（日/月報表本就單日/單月有界，不受此限）。
+      **逾時保護**：config 加 `DB_STATEMENT_TIMEOUT_MS`（預設 10000），`DSN()` 附 `statement_timeout` runtime 參數
+      （pgx 於每條連線建立時套用；migrations 走 `MigrateDSN` 不受影響），啟動時 `SHOW statement_timeout` 記 log 確認。
+      驗收：單元測試（parseRideListFilter 區間上限/邊界、config DSN 含/不含 timeout、MigrateDSN 不受影響）；
+      docker E2E：啟動 log `statement_timeout=10s`；`?from=2026-06-01&to=2026-08-01`→400、剛好 31 天→200。
 
 - [~] **F9-5. 分頁與有界回傳**
       訂單列表 `GET /api/admin/rides` 已補 `offset`/日期區間/關鍵字＋回 `total`（dispatch#2），

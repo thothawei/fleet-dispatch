@@ -49,6 +49,13 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("連線資料庫失敗")
 	}
+	// F9-4：確認 statement_timeout 已生效（pooled 連線的 runtime 設定），順便 ops 可見。
+	if cfg.DBStatementTimeoutMs > 0 {
+		var st string
+		if err := db.Raw("SHOW statement_timeout").Scan(&st).Error; err == nil {
+			log.Info().Str("statement_timeout", st).Msg("DB 每條 SQL 逾時保護已啟用")
+		}
+	}
 
 	redisClient := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr})
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
