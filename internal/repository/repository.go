@@ -593,6 +593,7 @@ func (r *FeeSettingsRepository) Update(s *model.FleetSettings) error {
 			"min_fare_cents":               s.MinFareCents,
 			"commission_bps":               s.CommissionBps,
 			"monthly_membership_fee_cents": s.MonthlyMembershipFeeCents,
+			"lost_item_fee_bps":            s.LostItemFeeBps,
 			"updated_by":                   s.UpdatedBy,
 			"updated_at":                   time.Now(),
 		}).Error

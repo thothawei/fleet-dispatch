@@ -389,6 +389,7 @@ func (h *AdminHandler) PutFeeSettings(c *gin.Context) {
 		MinFareCents              *int64 `json:"min_fare_cents"`
 		CommissionBps             *int64 `json:"commission_bps"`
 		MonthlyMembershipFeeCents *int64 `json:"monthly_membership_fee_cents"`
+		LostItemFeeBps            *int64 `json:"lost_item_fee_bps"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
@@ -396,7 +397,7 @@ func (h *AdminHandler) PutFeeSettings(c *gin.Context) {
 	}
 	actorID := middleware.AdminIDFromCtx(c)
 	if err := h.feeSettings.Update(req.BaseFareCents, req.PerKmFareCents, req.MinFareCents,
-		req.CommissionBps, req.MonthlyMembershipFeeCents, &actorID); err != nil {
+		req.CommissionBps, req.MonthlyMembershipFeeCents, req.LostItemFeeBps, &actorID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

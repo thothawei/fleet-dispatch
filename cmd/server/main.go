@@ -72,6 +72,8 @@ func main() {
 	rideEventRepo := repository.NewRideEventRepository(db)
 	feeSettingsRepo := repository.NewFeeSettingsRepository(db)
 	membershipInvoiceRepo := repository.NewMembershipInvoiceRepository(db)
+	rideMessageRepo := repository.NewRideMessageRepository(db)
+	lostItemRepo := repository.NewLostItemRepository(db)
 
 	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
 	if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
@@ -138,6 +140,8 @@ func main() {
 	trackingService.SetReports(reportRepo) // F9-3：完成時重算每日彙總 daily_driver_earnings
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
+	chatService := service.NewChatService(rideRepo, rideMessageRepo, hub)
+	lostItemService := service.NewLostItemService(rideRepo, lostItemRepo, feeSettings, hub)
 
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -155,6 +159,8 @@ func main() {
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenService)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
+	chatHandler := handler.NewChatHandler(chatService)
+	lostItemHandler := handler.NewLostItemHandler(lostItemService)
 
 	// 後台：管理員 repo/service/handler，並依環境變數種一個管理員（僅在尚無 admin 時）
 	adminRepo := repository.NewAdminRepository(db)
@@ -202,6 +208,10 @@ func main() {
 			customerAuthed.POST("/rides/:id/cancel-by-customer", rideHandler.CancelByCustomer)
 			customerAuthed.POST("/customer/device-token", deviceTokenHandler.RegisterByCustomer)
 			customerAuthed.DELETE("/customer/device-token", deviceTokenHandler.UnregisterByCustomer)
+			// 遺失物協尋：對已完成行程建單、查自己的協尋、支付處理費
+			customerAuthed.POST("/rides/:id/lost-items", lostItemHandler.CreateByCustomer)
+			customerAuthed.GET("/customer/lost-items", lostItemHandler.ListByCustomer)
+			customerAuthed.POST("/lost-items/:id/pay", lostItemHandler.Pay)
 		}
 
 		// 受 JWT 保護：司機操作（driver_id 取自 token，不信任 body）
@@ -221,10 +231,21 @@ func main() {
 			authed.POST("/rides/:id/complete", rideHandler.Complete)
 			authed.POST("/rides/:id/cancel", rideHandler.Cancel)
 			authed.POST("/rides/:id/decline", rideHandler.Decline)
+			// 遺失物協尋：司機工作清單、標記尋獲/歸還
+			authed.GET("/driver/lost-items", lostItemHandler.ListByDriver)
+			authed.POST("/lost-items/:id/found", lostItemHandler.MarkFound)
+			authed.POST("/lost-items/:id/return", lostItemHandler.MarkReturned)
 		}
 
 		// 軌跡回放：受多角色 JWT 保護，僅本趟乘客／司機／admin 可存取（授權在 handler）
 		api.GET("/rides/:id/track", middleware.MultiAuth(cfg.JWTSecret), rideHandler.Track)
+
+		// 行程內對話：歷史查詢（乘客/司機/admin）＋發話（僅乘客/司機）；即時遞送走 /ws 的 chat.message
+		api.GET("/rides/:id/messages", middleware.MultiAuth(cfg.JWTSecret), chatHandler.List)
+		api.POST("/rides/:id/messages", middleware.MultiAuth(cfg.JWTSecret), chatHandler.Send)
+		// 遺失物協尋：查單趟協尋單（乘客/司機/admin）＋結案（乘客/司機）
+		api.GET("/rides/:id/lost-items", middleware.MultiAuth(cfg.JWTSecret), lostItemHandler.GetByRide)
+		api.POST("/lost-items/:id/close", middleware.MultiAuth(cfg.JWTSecret), lostItemHandler.Close)
 
 		// 後台：登入公開，其餘受 admin JWT 保護
 		api.POST("/admin/login", adminHandler.Login)
