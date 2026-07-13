@@ -523,6 +523,11 @@ func (r *ReportRepository) RollupRideDay(rideID int64) error {
 
 // MonthlyDriverStats 月營運報表（F6）。讀 F9-3 預聚合表 daily_driver_earnings（每司機 ≤31 列）
 // 而非即時 GROUP BY 全表 rides。day 為 Taipei 日界，與 [monthStart, +1 月) 的月界一致。
+//
+// 會費／應付總公司以 membership_invoices（F8 帳本）為**單一真源**：LEFT JOIN 該司機當月帳單、
+// 讀「產生當下的快照金額」，而非即時費率。理由——車資/手續費本就快照定格，會費若改用即時費率，
+// 一旦 superadmin 調費率就會追溯竄改已結清月份、且與帳本失同步。未產生帳單者會費視為 0
+// （尚未入帳＝尚未應付），與帳本一致。invoices 有 UNIQUE(driver_id, period)，MAX 只是收斂該唯一列。
 func (r *ReportRepository) MonthlyDriverStats(month string) ([]MonthlyDriverReport, error) {
 	monthStart := month + "-01"
 	var rows []MonthlyDriverReport
@@ -533,26 +538,32 @@ func (r *ReportRepository) MonthlyDriverStats(month string) ([]MonthlyDriverRepo
 			SUM(dde.trip_count)::int AS trip_count,
 			SUM(dde.revenue_cents)::bigint AS total_revenue_cents,
 			SUM(dde.commission_cents)::bigint AS total_commission_cents,
-			SUM(dde.net_cents)::bigint AS driver_net_cents
+			SUM(dde.net_cents)::bigint AS driver_net_cents,
+			COALESCE(MAX(mi.amount_cents), 0)::bigint AS membership_fee_cents,
+			SUM(dde.commission_cents)::bigint + COALESCE(MAX(mi.amount_cents), 0)::bigint AS owed_to_hq_cents
 		FROM daily_driver_earnings dde
 		JOIN drivers d ON d.id = dde.driver_id
+		LEFT JOIN membership_invoices mi ON mi.driver_id = dde.driver_id AND mi.period = ?
 		WHERE dde.day >= ?::date AND dde.day < (?::date + INTERVAL '1 month')
 		GROUP BY dde.driver_id, d.name
 		ORDER BY total_revenue_cents DESC
-	`, monthStart, monthStart).Scan(&rows).Error
+	`, month, monthStart, monthStart).Scan(&rows).Error
 	return rows, err
 }
 
-// DriverEarnings 單一司機當月收入聚合（F7）。
+// DriverEarnings 單一司機當月收入聚合（F7）。MembershipFeeCents 讀自帳本快照（見下）。
 type DriverEarnings struct {
 	TripCount            int   `json:"trip_count"`
 	TotalRevenueCents    int64 `json:"total_revenue_cents"`
 	TotalCommissionCents int64 `json:"total_commission_cents"`
 	DriverNetCents       int64 `json:"driver_net_cents"`
+	MembershipFeeCents   int64 `json:"membership_fee_cents"`
 }
 
 // DriverMonthlyEarnings 查單一司機當月收入（F7）。month 為 YYYY-MM。
 // 讀 F9-3 預聚合表（≤31 列）；SUM 無 GROUP BY 恆回一列（無資料則為 0）。
+// 會費同 MonthlyDriverStats：以 membership_invoices 帳本快照為單一真源（scalar 子查詢取該司機當月
+// 帳單金額，未產生則 0），不再用即時費率，避免調費率追溯竄改已結清月份、與帳本失同步。
 func (r *ReportRepository) DriverMonthlyEarnings(driverID int64, month string) (DriverEarnings, error) {
 	monthStart := month + "-01"
 	var e DriverEarnings
@@ -561,10 +572,14 @@ func (r *ReportRepository) DriverMonthlyEarnings(driverID int64, month string) (
 			COALESCE(SUM(trip_count), 0)::int AS trip_count,
 			COALESCE(SUM(revenue_cents), 0)::bigint AS total_revenue_cents,
 			COALESCE(SUM(commission_cents), 0)::bigint AS total_commission_cents,
-			COALESCE(SUM(net_cents), 0)::bigint AS driver_net_cents
+			COALESCE(SUM(net_cents), 0)::bigint AS driver_net_cents,
+			COALESCE(
+				(SELECT amount_cents FROM membership_invoices WHERE driver_id = ? AND period = ?),
+				0
+			)::bigint AS membership_fee_cents
 		FROM daily_driver_earnings
 		WHERE driver_id = ? AND day >= ?::date AND day < (?::date + INTERVAL '1 month')
-	`, driverID, monthStart, monthStart).Scan(&e).Error
+	`, driverID, month, driverID, monthStart, monthStart).Scan(&e).Error
 	return e, err
 }
 
