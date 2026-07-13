@@ -27,6 +27,6 @@ func (r *RideEventRepository) Append(e *model.RideEvent) error {
 // ListByRideID 依時間正序回傳該訂單全部審計事件。
 func (r *RideEventRepository) ListByRideID(rideID int64) ([]model.RideEvent, error) {
 	var rows []model.RideEvent
-	err := r.db.Where("ride_id = ?", rideID).Order("created_at ASC, id ASC").Find(&rows).Error
+	err := r.db.Where("ride_id = ?", rideID).Order("created_at ASC, id ASC").Limit(MaxListRows).Find(&rows).Error
 	return rows, err
 }
