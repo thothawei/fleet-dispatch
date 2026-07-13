@@ -72,6 +72,7 @@ func TestParseRideListFilter_錯誤參數回錯(t *testing.T) {
 		"from 格式錯":   "from=2026%2F07%2F01",
 		"to 格式錯":     "to=07-10-2026",
 		"from 晚於 to": "from=2026-07-11&to=2026-07-10",
+		"區間超過上限":     "from=2026-07-01&to=2026-08-01", // 含頭尾 32 天 > 31
 	}
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -101,5 +102,12 @@ func TestParseRideListFilter_同日區間可接受(t *testing.T) {
 	}
 	if f.From != f.To {
 		t.Fatalf("from/to 應相同: %s %s", f.From, f.To)
+	}
+}
+
+func TestParseRideListFilter_區間上限邊界可接受(t *testing.T) {
+	// 含頭尾剛好 31 天（差 30 天）應可接受
+	if _, err := parseRideListFilter(mustQuery(t, "from=2026-07-01&to=2026-07-31")); err != nil {
+		t.Fatalf("31 天區間應可接受: %v", err)
 	}
 }

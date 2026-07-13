@@ -131,6 +131,10 @@ func (h *AdminHandler) Drivers(c *gin.Context) {
 
 const rideListDateLayout = "2006-01-02"
 
+// rideListMaxRangeDays 限制 from~to 自訂區間的最大跨度（含頭尾），
+// 避免超大範圍觸發全表掃描拖垮 DB（F9-4）。日/月報表本就單日/單月有界，不受此限。
+const rideListMaxRangeDays = 31
+
 // parseRideListFilter 解析 /api/admin/rides 的 query string。
 // 抽成純函式（不吃 *gin.Context）以便單元測試，不必起 DB。
 func parseRideListFilter(q url.Values) (repository.RideListFilter, error) {
@@ -171,19 +175,29 @@ func parseRideListFilter(q url.Values) (repository.RideListFilter, error) {
 		f.Offset = n
 	}
 
+	var fromT, toT time.Time
 	if f.From != "" {
-		if _, err := time.Parse(rideListDateLayout, f.From); err != nil {
+		t, err := time.Parse(rideListDateLayout, f.From)
+		if err != nil {
 			return f, fmt.Errorf("from 需為 YYYY-MM-DD 格式：%q", f.From)
 		}
+		fromT = t
 	}
 	if f.To != "" {
-		if _, err := time.Parse(rideListDateLayout, f.To); err != nil {
+		t, err := time.Parse(rideListDateLayout, f.To)
+		if err != nil {
 			return f, fmt.Errorf("to 需為 YYYY-MM-DD 格式：%q", f.To)
 		}
+		toT = t
 	}
-	// 兩者都是 YYYY-MM-DD 定長格式，字串比較等同日期比較
-	if f.From != "" && f.To != "" && f.From > f.To {
-		return f, fmt.Errorf("from 不可晚於 to")
+	if f.From != "" && f.To != "" {
+		if fromT.After(toT) {
+			return f, fmt.Errorf("from 不可晚於 to")
+		}
+		// F9-4：限制查詢跨度（含頭尾 rideListMaxRangeDays 天），避免超大區間打爆 DB。
+		if toT.Sub(fromT) > time.Duration(rideListMaxRangeDays-1)*24*time.Hour {
+			return f, fmt.Errorf("查詢區間不可超過 %d 天", rideListMaxRangeDays)
+		}
 	}
 
 	return f, nil

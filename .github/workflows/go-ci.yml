@@ -40,6 +40,7 @@ jobs:
         run: |
           CGO_ENABLED=0 go test -count=1 -timeout 60s \
             ./internal/auth/ \
+            ./internal/config/ \
             ./internal/constants/ \
             ./internal/events/ \
             ./internal/handler/ \
