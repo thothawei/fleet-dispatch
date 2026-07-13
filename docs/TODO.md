@@ -112,10 +112,13 @@
       驗收：單元測試（parseRideListFilter 區間上限/邊界、config DSN 含/不含 timeout、MigrateDSN 不受影響）；
       docker E2E：啟動 log `statement_timeout=10s`；`?from=2026-06-01&to=2026-08-01`→400、剛好 31 天→200。
 
-- [~] **F9-5. 分頁與有界回傳**
-      訂單列表 `GET /api/admin/rides` 已補 `offset`/日期區間/關鍵字＋回 `total`（dispatch#2），
-      admin 已改伺服器端分頁 ✅。**待補**：其餘「逐筆」列表全面 keyset/offset 化、禁無上限回傳的通盤檢查。
-      報表 API 已只回**聚合列**（每司機一列，天然有界）。
+- [x] **F9-5. 分頁與有界回傳** ✅（2026-07-13）
+      訂單列表 `GET /api/admin/rides` 伺服器端分頁（`offset`/日期/`q`/`total`，dispatch#2）。
+      **禁無上限回傳通盤檢查**：所有「逐筆」列表查詢加共用硬上限 `MaxListRows=5000`
+      （`DriverRepository.ListAll`/`ListIdle`、`AdminRepository.ListAll`、`MembershipInvoiceRepository.List`、
+      `DeviceTokenRepository.ListBySubject`、`RideEventRepository.ListByRideID`），任何清單不再無上限回傳。
+      報表 API 只回**聚合列**（每司機一列，隨 drivers 上限間接有界）；track 回單一 LineString（受行程長度自然有界）。
+      **後續（量體上升後）**：drivers／membership 逼近 `MaxListRows` 時改真 offset/keyset 分頁（比照 rides，含前端）。
 
 - [x] **F9-6. 會費表防重複入帳** ✅（隨 F8 migration `000013`）
       `membership_invoices` 加 `UNIQUE(driver_id, period)`（`uq_membership_driver_period`）+
@@ -160,8 +163,8 @@
 計費地基 **F1–F8＋F3 OSRM 里程退路＋F9-4 查詢跨度上限/`statement_timeout` 已全數合併進 main**，三端對帳與 F3/F9-4 皆 docker E2E 驗過。剩餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
 
 1. **F9-3 預聚合彙總表 `daily_driver_earnings`**：完成時增量更新或每日 rollup，報表優先讀彙總表。
-2. **F9-5（待補部分）**：其餘逐筆列表全面 keyset/offset 化的通盤檢查（訂單列表已伺服器端分頁）。
-3. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
+2. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
+3. **drivers／membership 真分頁**：逼近 `MaxListRows=5000` 上限時，比照 rides 改 offset/keyset 伺服器端分頁（含前端）。
 4. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。
 
 驗收前先 `EXPLAIN ANALYZE` 灌 50~100 萬筆確認走索引範圍掃描（見上「驗收方式」）。Git 走 PR（main 受保護 `enforce_admins: true`）。

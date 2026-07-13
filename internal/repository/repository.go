@@ -210,7 +210,7 @@ func (r *DriverRepository) SetPassword(id int64, passwordHash string) error {
 
 func (r *DriverRepository) ListIdle() ([]model.Driver, error) {
 	var drivers []model.Driver
-	err := r.db.Where("status = ?", constants.DriverStatusIdle).Find(&drivers).Error
+	err := r.db.Where("status = ?", constants.DriverStatusIdle).Limit(MaxListRows).Find(&drivers).Error
 	return drivers, err
 }
 
@@ -625,7 +625,8 @@ func (r *MembershipInvoiceRepository) List(period, status string) ([]MembershipI
 		JOIN drivers d ON d.id = mi.driver_id
 		WHERE mi.period = ? AND (? = '' OR mi.status = ?)
 		ORDER BY mi.driver_id
-	`, period, status, status).Scan(&rows).Error
+		LIMIT ?
+	`, period, status, status, MaxListRows).Scan(&rows).Error
 	return rows, err
 }
 
@@ -668,7 +669,7 @@ func (r *RideRepository) TrackDistanceM(rideID int64) (int, error) {
 
 func (r *DriverRepository) ListAll() ([]model.Driver, error) {
 	var drivers []model.Driver
-	err := r.db.Order("id ASC").Find(&drivers).Error
+	err := r.db.Order("id ASC").Limit(MaxListRows).Find(&drivers).Error
 	return drivers, err
 }
 
@@ -688,6 +689,11 @@ const (
 	RideListDefaultLimit = 100
 	RideListMaxLimit     = 500
 )
+
+// MaxListRows 是「逐筆」列表查詢的硬上限，避免任何清單無上限回傳拖垮 DB/記憶體（F9-5）。
+// 設得遠高於現實規模作安全網；drivers／membership 若逼近此值代表車隊已大到該改真分頁
+// （offset/keyset，比照 RideRepository.List）。
+const MaxListRows = 5000
 
 // RideListFilter 後台訂單列表的查詢條件；欄位為零值即不套用該條件。
 // From/To 是 YYYY-MM-DD，比對 requested_at 的日期（含頭尾），與 DailyDriverStats 的
@@ -785,7 +791,7 @@ func (r *AdminRepository) FindByID(id int64) (*model.Admin, error) {
 
 func (r *AdminRepository) ListAll() ([]model.Admin, error) {
 	var list []model.Admin
-	err := r.db.Order("id asc").Find(&list).Error
+	err := r.db.Order("id asc").Limit(MaxListRows).Find(&list).Error
 	return list, err
 }
 

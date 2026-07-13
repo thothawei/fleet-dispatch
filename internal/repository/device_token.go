@@ -57,7 +57,7 @@ func (r *DeviceTokenRepository) Delete(role string, subjectID int64, token strin
 func (r *DeviceTokenRepository) ListBySubject(role string, subjectID int64) ([]notify.Device, error) {
 	var rows []model.DeviceToken
 	if err := r.db.Where("role = ? AND subject_id = ?", role, subjectID).
-		Order("id ASC").Find(&rows).Error; err != nil {
+		Order("id ASC").Limit(MaxListRows).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]notify.Device, 0, len(rows))
