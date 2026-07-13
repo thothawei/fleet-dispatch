@@ -163,6 +163,7 @@ type FleetSettings struct {
 	MinFareCents              int64     `gorm:"column:min_fare_cents;not null" json:"min_fare_cents"`
 	CommissionBps             int       `gorm:"column:commission_bps;not null" json:"commission_bps"`
 	MonthlyMembershipFeeCents int64     `gorm:"column:monthly_membership_fee_cents;not null" json:"monthly_membership_fee_cents"`
+	LostItemFeeBps            int       `gorm:"column:lost_item_fee_bps;not null" json:"lost_item_fee_bps"`
 	UpdatedBy                 *int64    `gorm:"column:updated_by" json:"updated_by"`
 	UpdatedAt                 time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
 }
@@ -185,6 +186,40 @@ type MembershipInvoice struct {
 
 func (MembershipInvoice) TableName() string {
 	return "membership_invoices"
+}
+
+// RideMessage 行程內對話訊息（乘客↔司機）。即時遞送走 WebSocket（chat.message），本表為歷史真源。
+type RideMessage struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	RideID     int64     `gorm:"column:ride_id;not null" json:"ride_id"`
+	SenderRole string    `gorm:"column:sender_role;not null" json:"sender_role"`
+	SenderID   int64     `gorm:"column:sender_id;not null" json:"sender_id"`
+	Body       string    `gorm:"not null" json:"body"`
+	CreatedAt  time.Time `gorm:"not null" json:"created_at"`
+}
+
+func (RideMessage) TableName() string {
+	return "ride_messages"
+}
+
+// LostItemRequest 遺失物協尋單。fee_cents／fee_bps 於建立當下依「該趟車資 × 處理費%」定格快照，
+// 日後調整處理費%不影響既有協尋單（與車資/手續費同一套快照制）。
+type LostItemRequest struct {
+	ID          int64      `gorm:"primaryKey" json:"id"`
+	RideID      int64      `gorm:"column:ride_id;not null" json:"ride_id"`
+	CustomerID  int64      `gorm:"column:customer_id;not null" json:"customer_id"`
+	DriverID    int64      `gorm:"column:driver_id;not null" json:"driver_id"`
+	Description string     `gorm:"not null" json:"description"`
+	FeeCents    int64      `gorm:"column:fee_cents;not null" json:"fee_cents"`
+	FeeBps      int        `gorm:"column:fee_bps;not null" json:"fee_bps"`
+	Status      string     `gorm:"not null;default:'open'" json:"status"`
+	PaidAt      *time.Time `gorm:"column:paid_at" json:"paid_at"`
+	CreatedAt   time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt   time.Time  `gorm:"not null" json:"updated_at"`
+}
+
+func (LostItemRequest) TableName() string {
+	return "lost_item_requests"
 }
 
 type Admin struct {

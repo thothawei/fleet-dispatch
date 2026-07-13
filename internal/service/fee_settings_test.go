@@ -58,11 +58,17 @@ func TestValidateFeeSettingsRejectsOutOfRange(t *testing.T) {
 	fs := newFeeSettingsForTest(8500, 2000, 8500, 1500, 300000)
 
 	neg := int64(-1)
-	if err := fs.Update(&neg, nil, nil, nil, nil, nil); err != ErrInvalidFeeSettings {
+	if err := fs.Update(&neg, nil, nil, nil, nil, nil, nil); err != ErrInvalidFeeSettings {
 		t.Fatalf("負起步價應被拒，got %v", err)
 	}
 	tooHighBps := int64(10001)
-	if err := fs.Update(nil, nil, nil, &tooHighBps, nil, nil); err != ErrInvalidFeeSettings {
+	if err := fs.Update(nil, nil, nil, &tooHighBps, nil, nil, nil); err != ErrInvalidFeeSettings {
 		t.Fatalf("手續費 bps > 10000 應被拒，got %v", err)
+	}
+	if err := fs.Update(nil, nil, nil, nil, nil, &tooHighBps, nil); err != ErrInvalidFeeSettings {
+		t.Fatalf("遺失物處理費 bps > 10000 應被拒，got %v", err)
+	}
+	if err := fs.Update(nil, nil, nil, nil, nil, &neg, nil); err != ErrInvalidFeeSettings {
+		t.Fatalf("負遺失物處理費 bps 應被拒，got %v", err)
 	}
 }

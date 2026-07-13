@@ -23,6 +23,7 @@ type FeeSettings struct {
 	minFareCents              int64
 	commissionBps             int
 	monthlyMembershipFeeCents int64
+	lostItemFeeBps            int
 }
 
 // NewFeeSettings 自 DB 載入費率設定到記憶體快取。
@@ -38,6 +39,7 @@ func NewFeeSettings(repo *repository.FeeSettingsRepository) (*FeeSettings, error
 		minFareCents:              row.MinFareCents,
 		commissionBps:             row.CommissionBps,
 		monthlyMembershipFeeCents: row.MonthlyMembershipFeeCents,
+		lostItemFeeBps:            row.LostItemFeeBps,
 	}, nil
 }
 
@@ -51,7 +53,15 @@ func (s *FeeSettings) JSON() map[string]int64 {
 		"min_fare_cents":               s.minFareCents,
 		"commission_bps":               int64(s.commissionBps),
 		"monthly_membership_fee_cents": s.monthlyMembershipFeeCents,
+		"lost_item_fee_bps":            int64(s.lostItemFeeBps),
 	}
+}
+
+// LostItemFeeBps 遺失物處理費%（bps），供協尋單建立時快照。
+func (s *FeeSettings) LostItemFeeBps() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lostItemFeeBps
 }
 
 // MonthlyMembershipFeeCents 供月報表計算應付總公司之會費部分。
@@ -96,7 +106,7 @@ func roundDiv(a, b int64) int64 {
 }
 
 // Update 覆寫費率設定（nil 欄位表示不變），先驗證、寫 DB，再更新快取。
-func (s *FeeSettings) Update(baseFareCents, perKmFareCents, minFareCents, commissionBps, monthlyMembershipFeeCents, updatedBy *int64) error {
+func (s *FeeSettings) Update(baseFareCents, perKmFareCents, minFareCents, commissionBps, monthlyMembershipFeeCents, lostItemFeeBps, updatedBy *int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -106,6 +116,7 @@ func (s *FeeSettings) Update(baseFareCents, perKmFareCents, minFareCents, commis
 		MinFareCents:              s.minFareCents,
 		CommissionBps:             s.commissionBps,
 		MonthlyMembershipFeeCents: s.monthlyMembershipFeeCents,
+		LostItemFeeBps:            s.lostItemFeeBps,
 		UpdatedBy:                 updatedBy,
 	}
 	if baseFareCents != nil {
@@ -123,6 +134,9 @@ func (s *FeeSettings) Update(baseFareCents, perKmFareCents, minFareCents, commis
 	if monthlyMembershipFeeCents != nil {
 		next.MonthlyMembershipFeeCents = *monthlyMembershipFeeCents
 	}
+	if lostItemFeeBps != nil {
+		next.LostItemFeeBps = int(*lostItemFeeBps)
+	}
 
 	if err := validateFeeSettings(next); err != nil {
 		return err
@@ -135,6 +149,7 @@ func (s *FeeSettings) Update(baseFareCents, perKmFareCents, minFareCents, commis
 	s.minFareCents = next.MinFareCents
 	s.commissionBps = next.CommissionBps
 	s.monthlyMembershipFeeCents = next.MonthlyMembershipFeeCents
+	s.lostItemFeeBps = next.LostItemFeeBps
 	return nil
 }
 
@@ -151,6 +166,8 @@ func validateFeeSettings(s model.FleetSettings) error {
 	case s.CommissionBps < 0 || s.CommissionBps > 10000:
 		return ErrInvalidFeeSettings
 	case s.MonthlyMembershipFeeCents < 0 || s.MonthlyMembershipFeeCents > maxMembership:
+		return ErrInvalidFeeSettings
+	case s.LostItemFeeBps < 0 || s.LostItemFeeBps > 10000:
 		return ErrInvalidFeeSettings
 	default:
 		return nil
