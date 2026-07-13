@@ -49,7 +49,7 @@ git 慣例（2026-07-10 起）：三 repo 的 `main` **受 branch protection 保
 > 需求：後台設手續費%、報表顯示司機營業額與應付總公司、車隊會費。設計定案與逐項見各 repo `docs/TODO.md`。
 - **後端 F1–F8（line-fleet-dispatch）**：`fleet_settings` 費率表（migration 000011）、rides 加計費快照欄位（000012）、完成時依當前費率快照定格計費（金額存分、手續費存 bps）、費率設定 API（superadmin）、日/月報表加金額、司機收入 API、會費落帳 `membership_invoices`（000013，`UNIQUE(driver_id,period)` 防重複）。
 - **F3 OSRM 里程退路（2026-07-12）**：完成計費里程＝`max(GPS 軌跡里程, OSRM pickup→dropoff 路線里程)`，軌跡 0/稀疏時用路線里程補回。docker E2E：track_m=0→route_m=6263→fare NT$210.26（非 min_fare 8500）。
-- **F9 大資料量預防**：F9-1 sargable 範圍查詢+複合索引、F9-2 加總防溢位、F9-4 查詢跨度上限（rides `from~to` ≤31 天）+`statement_timeout` 逾時保護、F9-6 會費防重複入帳已做；**只剩 F9-3 預聚合彙總表、F9-7 rides 月分割**與 F9-5 逐筆列表通盤 keyset 化，留「量體上升後」。
+- **F9 大資料量預防**：F9-1 sargable 範圍查詢+複合索引、F9-2 加總防溢位、F9-4 查詢跨度上限（rides `from~to` ≤31 天）+`statement_timeout` 逾時保護、F9-5 逐筆列表加硬上限 `MaxListRows=5000`（禁無上限回傳）、F9-6 會費防重複入帳已做；**只剩 F9-3 預聚合彙總表、F9-7 rides 月分割**（及 drivers/membership 逼近上限時的真分頁），留「量體上升後」。
 - **後台 G1–G3（line-fleet-admin）**：費率設定頁、日報表金額欄、月營運報表頁（應付總公司+CSV）。
 - **會費帳單 UI（line-fleet-admin，2026-07-12）**：`MembershipInvoicesPage`（`/membership-invoices`）——月選+狀態篩選、未繳/已繳計數，superadmin 可「產生本月帳單」（冪等）與「標記已繳/改未繳」、viewer 只讀。**F8 至此後端＋後台 UI 全鏈路打通**。
 - **App E1–E2（line-fleet-app）**：司機收入頁（月切換、應付總公司）、乘客完成卡顯示車資。
@@ -88,7 +88,7 @@ git 慣例（2026-07-10 起）：三 repo 的 `main` **受 branch protection 保
 1. ~~座標導航 E2E~~ ✅ 2026-07-11：App 模擬器驗證司機端「導航去目的地」開出的是座標而非地址（`dumpsys` 攔 intent `query=lat,lng`）。
 2. ~~後端訂單查詢 API + 前端伺服器端分頁~~ ✅ 2026-07-11：`GET /api/admin/rides` 的 `offset`/`from`/`to`/`q`/`total`，admin 已改伺服器端分頁。
 3. **E3 生產部署 / E4 監控**（尚未開始，DevOps 剩下的兩項）。
-4. **F9-3/F9-7（量體上升後才需）**：預聚合彙總表 `daily_driver_earnings`、rides 月分割。灌 50~100 萬筆 `EXPLAIN ANALYZE` 驗索引後再做。（F9-4 查詢跨度上限+`statement_timeout` 已於 2026-07-13 完成。）
+4. **F9-3/F9-7（量體上升後才需）**：預聚合彙總表 `daily_driver_earnings`、rides 月分割。灌 50~100 萬筆 `EXPLAIN ANALYZE` 驗索引後再做。另 drivers/membership 逼近 `MaxListRows=5000` 時改真 offset/keyset 分頁。（F9-4 查詢跨度上限+`statement_timeout`、F9-5 逐筆列表硬上限已於 2026-07-13 完成。）
 5. **外部依賴**：Maps API key（乘客端地圖版 B2/B3 實測）、真 FCM/APNs + Firebase 專案（A2 真裝置推播）、A5 iOS build（Xcode+CocoaPods）。
 6. ~~會費帳單 UI~~ ✅ 2026-07-12（admin#8）：`MembershipInvoicesPage` 列表／產生（冪等）／標記已繳，viewer 只讀；docker E2E 驗過。
 
