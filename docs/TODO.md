@@ -80,7 +80,11 @@
       `List(period,status)`、`SetPaid`。API：`POST /api/admin/membership-invoices/generate`
       與 `PATCH /api/admin/membership-invoices/:id`（superadmin）、`GET /api/admin/membership-invoices`（viewer）。
       **語意**：只對「當月有完成行程」的司機開帳單，與 F6/F7「無跑車不收會費」一致；金額為產生當下快照，
-      日後改月會費不影響歷史帳單。**注意**：F6 月報表仍即時算會費（live view），與已落帳的 invoice 為兩個視角。
+      日後改月會費不影響歷史帳單。
+      **單一真源（2026-07-13 修正）**：F6 月報表與 F7 司機收入原本用「即時費率」算會費，與已落帳 invoice 是兩個視角——
+      調費率會追溯竄改已結清月份、對從未產生帳單的月份也照收、且無視繳款。已改為 F6/F7 的會費/應付總公司
+      一律 LEFT JOIN `membership_invoices` 讀帳本快照（`repository.go` MonthlyDriverStats/DriverMonthlyEarnings），
+      未產生帳單者會費為 0（尚未入帳＝尚未應付）。與車資/手續費的快照心智模型一致，三端（F6=F7=帳本）恆等、不受費率調整影響。
 
 ### 大資料量預防措施（DB scale，2026-07-11 納入）
 
