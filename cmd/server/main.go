@@ -134,7 +134,8 @@ func main() {
 	)
 	trackingService.SetRideEvents(rideEventRepo)
 	trackingService.SetFeeSettings(feeSettings)
-	trackingService.SetOSRM(osrm) // F3：軌跡里程偏低時以 OSRM 路線里程作計費地板
+	trackingService.SetOSRM(osrm)          // F3：軌跡里程偏低時以 OSRM 路線里程作計費地板
+	trackingService.SetReports(reportRepo) // F9-3：完成時重算每日彙總 daily_driver_earnings
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
 

@@ -99,10 +99,16 @@
       報表金額加總與里程加總一律 `::bigint`／Go `int64`；
       金額欄位本身 `BIGINT`（存分）。`DailyDriverReport.TotalDistanceM` 由 `int` 改 `int64`。
 
-- [ ] **F9-3. 預聚合彙總表 `daily_driver_earnings`**（量體上升後啟用）
-      欄位：`driver_id, day, trip_count, revenue, commission, net`，
-      主鍵 `(driver_id, day)`。完成行程時增量更新，或每日排程 rollup。
-      報表優先讀彙總表，原始 `rides` 僅供稽核/回溯，避免每次即時 GROUP BY 全表。
+- [x] **F9-3. 預聚合彙總表 `daily_driver_earnings`** ✅（2026-07-13）
+      表（migration `000014`）：`driver_id, day, trip_count, revenue_cents, commission_cents, net_cents`，
+      PK `(driver_id, day)` + `day` 索引；`day` 以 **Asia/Taipei 日界**（與報表月界一致）。
+      **重算式 rollup（非 +1 增量）**：`ReportRepository.RollupRideDay(rideID)` 於完成時
+      `INSERT…SELECT…GROUP BY…ON CONFLICT DO UPDATE` 覆寫該 (司機,日) 桶——冪等、永遠等於 rides 即時聚合、
+      可安全重跑/自我修復；`TrackingService.Complete` best-effort 呼叫（失敗不擋完成，rides 為真源）。
+      月報表（F6）／司機收入（F7）改讀彙總表（每司機 ≤31 列），不再即時 GROUP BY 全表 rides；
+      日報表維持 live（含 distance/pickup，單日有界）。migration 回填既有已完成行程。
+      驗收：整合測試 `TestBillingReports`（讀彙總 + rollup + 冪等）通過；docker E2E——回填 3 司機值正確、
+      月報表(彙總)==live GROUP BY rides 逐欄相同、完成新行程觸發 rollup 新增當日桶、F6==F7 跨日加總正確。
 
 - [x] **F9-4. 查詢範圍上限 + 逾時保護** ✅（2026-07-13）
       **查詢跨度上限**：`parseRideListFilter` 對 `from`~`to` 自訂區間加 `rideListMaxRangeDays=31`（含頭尾）上限，
@@ -160,12 +166,11 @@
 
 ## 下次任務
 
-計費地基 **F1–F8＋F3 OSRM 里程退路＋F9-4 查詢跨度上限/`statement_timeout` 已全數合併進 main**，三端對帳與 F3/F9-4 皆 docker E2E 驗過。剩餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
+計費地基 **F1–F8＋F3 里程退路＋F9-1~F9-6 已全數合併進 main**，三端對帳與 F3/F9-3/F9-4 皆 docker E2E 驗過。剩餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
 
-1. **F9-3 預聚合彙總表 `daily_driver_earnings`**：完成時增量更新或每日 rollup，報表優先讀彙總表。
-2. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
-3. **drivers／membership 真分頁**：逼近 `MaxListRows=5000` 上限時，比照 rides 改 offset/keyset 伺服器端分頁（含前端）。
-4. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。
+1. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
+2. **drivers／membership 真分頁**：逼近 `MaxListRows=5000` 上限時，比照 rides 改 offset/keyset 伺服器端分頁（含前端）。
+3. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。
 
 驗收前先 `EXPLAIN ANALYZE` 灌 50~100 萬筆確認走索引範圍掃描（見上「驗收方式」）。Git 走 PR（main 受保護 `enforce_admins: true`）。
 

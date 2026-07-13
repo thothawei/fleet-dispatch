@@ -38,6 +38,7 @@ type TrackingService struct {
 	audit     rideAuditor
 	fees      *FeeSettings
 	osrm      *osrmclient.Client
+	reports   *repository.ReportRepository
 
 	etaMinInterval   time.Duration
 	etaDistThreshold float64
@@ -85,6 +86,11 @@ func (s *TrackingService) SetFeeSettings(fees *FeeSettings) {
 // SetOSRM 注入 OSRM client，完成計費時作為 GPS 軌跡里程偏低（0/稀疏）的退路；可選。
 func (s *TrackingService) SetOSRM(osrm *osrmclient.Client) {
 	s.osrm = osrm
+}
+
+// SetReports 注入報表 repo，完成行程時重算該 (司機,日) 的預聚合彙總（F9-3）；可選。
+func (s *TrackingService) SetReports(reports *repository.ReportRepository) {
+	s.reports = reports
 }
 
 // publish nil-safe 事件發佈
@@ -275,6 +281,13 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 	}
 	if err := s.rides.CompleteRide(rideID, distanceM, fareCents, commissionCents, driverNetCents); err != nil {
 		return err
+	}
+	// F9-3：重算該 (司機,日) 的預聚合彙總（冪等）。best-effort——rides 仍是真源，
+	// 失敗只讓該桶暫時過時，下次同司機同日完成或重算即自我修復，不擋完成流程。
+	if s.reports != nil {
+		if err := s.reports.RollupRideDay(rideID); err != nil {
+			log.Error().Err(err).Int64("ride_id", rideID).Msg("F9-3 每日彙總更新失敗（rides 為真源，可重算修復）")
+		}
 	}
 	s.audit.record(rideID, statusPtr(constants.RideStatusPickedUp), constants.RideStatusCompleted,
 		events.TypeRideCompleted, events.ActorDriver, idPtr(driverID), "")

@@ -67,6 +67,10 @@ func TestBillingReports(t *testing.T) {
 		if err := db.Create(ride).Error; err != nil {
 			t.Fatalf("建立已完成行程失敗：%v", err)
 		}
+		// F9-3：月報表/司機收入改讀預聚合表，直接建的行程需觸發 rollup 填彙總（模擬完成時的重算）。
+		if err := reports.RollupRideDay(ride.ID); err != nil {
+			t.Fatalf("每日彙總 rollup 失敗：%v", err)
+		}
 	}
 
 	wantRevenue := int64(18500 + 8500)   // 27000
@@ -113,6 +117,22 @@ func TestBillingReports(t *testing.T) {
 	}
 	if empty.TripCount != 0 || empty.TotalRevenueCents != 0 {
 		t.Fatalf("空月應為 0，得到 %+v", empty)
+	}
+
+	// F9-3 冪等性：重跑 rollup（重算整桶）不應改變彙總。
+	var anyRideID int64
+	if err := db.Raw("SELECT id FROM rides WHERE driver_id = ? LIMIT 1", driver.ID).Scan(&anyRideID).Error; err != nil || anyRideID == 0 {
+		t.Fatalf("取行程 id 失敗：%v", err)
+	}
+	if err := reports.RollupRideDay(anyRideID); err != nil {
+		t.Fatalf("重跑 rollup 失敗：%v", err)
+	}
+	monthly2, err := reports.MonthlyDriverStats(billTestMonth)
+	if err != nil {
+		t.Fatalf("重跑後月報表查詢失敗：%v", err)
+	}
+	if len(monthly2) != 1 || monthly2[0].TripCount != 2 || monthly2[0].TotalRevenueCents != wantRevenue {
+		t.Fatalf("重跑 rollup 後月報表變了（應冪等）：%+v", monthly2)
 	}
 }
 

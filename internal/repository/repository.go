@@ -495,27 +495,51 @@ type MonthlyDriverReport struct {
 	OwedToHqCents        int64  `json:"owed_to_hq_cents"`
 }
 
-// MonthlyDriverStats 月報表聚合（F6）。month 為 YYYY-MM。
-// 用半開區間 [month-01, +1 month) 走 idx_rides_status_completed；只回當月有完成行程的司機。
+// RollupRideDay 於行程完成後，重算該行程所屬 (司機, 台北日) 的彙總桶（F9-3）。
+// 以「重算整桶」而非「+1 增量」實作——冪等、永遠等於 rides 的即時聚合，可安全重跑、自我修復。
+func (r *ReportRepository) RollupRideDay(rideID int64) error {
+	return r.db.Exec(`
+		INSERT INTO daily_driver_earnings (driver_id, day, trip_count, revenue_cents, commission_cents, net_cents, updated_at)
+		SELECT r2.driver_id,
+		       (r2.completed_at AT TIME ZONE 'Asia/Taipei')::date AS day,
+		       COUNT(*)::int,
+		       COALESCE(SUM(r2.fare_amount_cents), 0)::bigint,
+		       COALESCE(SUM(r2.commission_amount_cents), 0)::bigint,
+		       COALESCE(SUM(r2.driver_net_amount_cents), 0)::bigint,
+		       NOW()
+		FROM rides r2
+		JOIN rides r1 ON r1.id = ?
+		WHERE r2.status = ? AND r2.driver_id = r1.driver_id
+		  AND (r2.completed_at AT TIME ZONE 'Asia/Taipei')::date = (r1.completed_at AT TIME ZONE 'Asia/Taipei')::date
+		GROUP BY r2.driver_id, (r2.completed_at AT TIME ZONE 'Asia/Taipei')::date
+		ON CONFLICT (driver_id, day) DO UPDATE SET
+		  trip_count       = EXCLUDED.trip_count,
+		  revenue_cents    = EXCLUDED.revenue_cents,
+		  commission_cents = EXCLUDED.commission_cents,
+		  net_cents        = EXCLUDED.net_cents,
+		  updated_at       = NOW()
+	`, rideID, constants.RideStatusCompleted).Error
+}
+
+// MonthlyDriverStats 月營運報表（F6）。讀 F9-3 預聚合表 daily_driver_earnings（每司機 ≤31 列）
+// 而非即時 GROUP BY 全表 rides。day 為 Taipei 日界，與 [monthStart, +1 月) 的月界一致。
 func (r *ReportRepository) MonthlyDriverStats(month string) ([]MonthlyDriverReport, error) {
 	monthStart := month + "-01"
 	var rows []MonthlyDriverReport
 	err := r.db.Raw(`
 		SELECT
-			r.driver_id,
+			dde.driver_id,
 			d.name AS driver_name,
-			COUNT(*)::int AS trip_count,
-			COALESCE(SUM(r.fare_amount_cents), 0)::bigint AS total_revenue_cents,
-			COALESCE(SUM(r.commission_amount_cents), 0)::bigint AS total_commission_cents,
-			COALESCE(SUM(r.driver_net_amount_cents), 0)::bigint AS driver_net_cents
-		FROM rides r
-		JOIN drivers d ON d.id = r.driver_id
-		WHERE r.status = ?
-		  AND r.completed_at >= ?::date
-		  AND r.completed_at < (?::date + INTERVAL '1 month')
-		GROUP BY r.driver_id, d.name
+			SUM(dde.trip_count)::int AS trip_count,
+			SUM(dde.revenue_cents)::bigint AS total_revenue_cents,
+			SUM(dde.commission_cents)::bigint AS total_commission_cents,
+			SUM(dde.net_cents)::bigint AS driver_net_cents
+		FROM daily_driver_earnings dde
+		JOIN drivers d ON d.id = dde.driver_id
+		WHERE dde.day >= ?::date AND dde.day < (?::date + INTERVAL '1 month')
+		GROUP BY dde.driver_id, d.name
 		ORDER BY total_revenue_cents DESC
-	`, constants.RideStatusCompleted, monthStart, monthStart).Scan(&rows).Error
+	`, monthStart, monthStart).Scan(&rows).Error
 	return rows, err
 }
 
@@ -528,21 +552,19 @@ type DriverEarnings struct {
 }
 
 // DriverMonthlyEarnings 查單一司機當月收入（F7）。month 為 YYYY-MM。
-// SUM 無 GROUP BY 恆回一列（無資料則為 0），走 idx_rides_driver_completed。
+// 讀 F9-3 預聚合表（≤31 列）；SUM 無 GROUP BY 恆回一列（無資料則為 0）。
 func (r *ReportRepository) DriverMonthlyEarnings(driverID int64, month string) (DriverEarnings, error) {
 	monthStart := month + "-01"
 	var e DriverEarnings
 	err := r.db.Raw(`
 		SELECT
-			COUNT(*)::int AS trip_count,
-			COALESCE(SUM(fare_amount_cents), 0)::bigint AS total_revenue_cents,
-			COALESCE(SUM(commission_amount_cents), 0)::bigint AS total_commission_cents,
-			COALESCE(SUM(driver_net_amount_cents), 0)::bigint AS driver_net_cents
-		FROM rides
-		WHERE driver_id = ? AND status = ?
-		  AND completed_at >= ?::date
-		  AND completed_at < (?::date + INTERVAL '1 month')
-	`, driverID, constants.RideStatusCompleted, monthStart, monthStart).Scan(&e).Error
+			COALESCE(SUM(trip_count), 0)::int AS trip_count,
+			COALESCE(SUM(revenue_cents), 0)::bigint AS total_revenue_cents,
+			COALESCE(SUM(commission_cents), 0)::bigint AS total_commission_cents,
+			COALESCE(SUM(net_cents), 0)::bigint AS driver_net_cents
+		FROM daily_driver_earnings
+		WHERE driver_id = ? AND day >= ?::date AND day < (?::date + INTERVAL '1 month')
+	`, driverID, monthStart, monthStart).Scan(&e).Error
 	return e, err
 }
 
