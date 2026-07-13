@@ -157,13 +157,12 @@
 
 ## 下次任務
 
-計費地基 **F1–F8＋F3 OSRM 里程退路已全數合併進 main**，三端對帳與 F3 退路皆 docker E2E 驗過。剩餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
+計費地基 **F1–F8＋F3 OSRM 里程退路＋F9-4 查詢跨度上限/`statement_timeout` 已全數合併進 main**，三端對帳與 F3/F9-4 皆 docker E2E 驗過。剩餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
 
 1. **F9-3 預聚合彙總表 `daily_driver_earnings`**：完成時增量更新或每日 rollup，報表優先讀彙總表。
-2. **F9-4 查詢範圍上限 + `statement_timeout`**：報表 API 限制查詢跨度、DB 逾時保護。
-3. **F9-5（待補部分）**：其餘逐筆列表全面 keyset/offset 化的通盤檢查。
-4. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
-5. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。
+2. **F9-5（待補部分）**：其餘逐筆列表全面 keyset/offset 化的通盤檢查（訂單列表已伺服器端分頁）。
+3. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
+4. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。
 
 驗收前先 `EXPLAIN ANALYZE` 灌 50~100 萬筆確認走索引範圍掃描（見上「驗收方式」）。Git 走 PR（main 受保護 `enforce_admins: true`）。
 
