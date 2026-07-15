@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"line-fleet-dispatch/internal/auth"
+	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/middleware"
 	"line-fleet-dispatch/internal/model"
 	redisstore "line-fleet-dispatch/internal/redis"
@@ -33,6 +34,7 @@ type AdminHandler struct {
 	adminUsers         *service.AdminUsers
 	feeSettings        *service.FeeSettings
 	membershipInvoices *repository.MembershipInvoiceRepository
+	lostItems          *repository.LostItemRepository
 	redis              *redisstore.Store
 	jwtSecret          string
 	jwtExpiryHours     int
@@ -46,6 +48,11 @@ func (h *AdminHandler) SetFeeSettings(fs *service.FeeSettings) {
 // SetMembershipInvoices 注入會費帳單 repo（供 /membership-invoices）；可選。
 func (h *AdminHandler) SetMembershipInvoices(repo *repository.MembershipInvoiceRepository) {
 	h.membershipInvoices = repo
+}
+
+// SetLostItems 注入協尋單 repo（供 /lost-items 總覽）；可選。
+func (h *AdminHandler) SetLostItems(repo *repository.LostItemRepository) {
+	h.lostItems = repo
 }
 
 func NewAdminHandler(
@@ -443,6 +450,32 @@ func (h *AdminHandler) ListMembershipInvoices(c *gin.Context) {
 		rows = []repository.MembershipInvoiceRow{}
 	}
 	c.JSON(http.StatusOK, gin.H{"month": month, "invoices": rows})
+}
+
+// ListLostItems GET /api/admin/lost-items?status=open（viewer）
+// 協尋單總覽；status 空字串為全部。
+func (h *AdminHandler) ListLostItems(c *gin.Context) {
+	if h.lostItems == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "協尋單總覽未啟用"})
+		return
+	}
+	status := c.Query("status")
+	switch status {
+	case "", constants.LostItemStatusOpen, constants.LostItemStatusFound,
+		constants.LostItemStatusPaid, constants.LostItemStatusReturned, constants.LostItemStatusClosed:
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status 僅接受 open / found / paid / returned / closed"})
+		return
+	}
+	rows, err := h.lostItems.ListAll(status)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if rows == nil {
+		rows = []repository.LostItemAdminRow{}
+	}
+	c.JSON(http.StatusOK, gin.H{"lost_items": rows})
 }
 
 // MarkMembershipInvoicePaid PATCH /api/admin/membership-invoices/:id — body {"paid": true/false}（superadmin）
