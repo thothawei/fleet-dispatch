@@ -195,8 +195,14 @@
   司機工作清單即時反映。驗畢費率還原、環境清除。
   另注意：本機 `go test ./...` 因 service 套件整合測試逾 10 分鐘，需 `-timeout 30m`
   （CI 只跑非 Docker 白名單，不受影響）。
-- **Phase 2（未做）**：付款目前為記帳式確認（無金流）；admin 後台的協尋單總覽列表頁；
-  聊天訊息的推播通知（FCM，App 被殺時）。
+- **Phase 2（部分完成）**：付款目前為記帳式確認（無金流）；聊天訊息的推播通知（FCM，App 被殺時）仍未做。
+- [x] **H4. admin 協尋單總覽 API**（2026-07-15）：`GET /api/admin/lost-items?status=`（viewer 唯讀，
+      掛 admin read 群組）——`LostItemRepository.ListAll` JOIN 司機/乘客姓名、status 白名單驗證（非法 400）、
+      新的在前、`LIMIT MaxListRows`。比照 membership-invoices 的 setter 注入。
+      驗收：整合測試 `TestLostItemAdminList`（JOIN 姓名/篩選/排序）＋ handler 測試（400/503/空庫 200 空陣列）；
+      docker E2E——smoke_test 造完成行程→互傳訊息→建協尋單（fee 快照 850）→標記尋獲→admin 總覽含姓名/狀態/快照、
+      `status=found` 有 `open` 空、非法 status 400、未帶 token 401、admin 讀 `/rides/:id/messages` 稽核 OK。
+      前端頁面：fleet-frontEnd#11（`/lost-items` 總覽頁＋訂單詳情對話稽核卡）。
 
 ---
 
@@ -204,8 +210,9 @@
 
 計費地基 **F1–F8＋F3 里程退路＋F9-1~F9-6 已全數合併進 main**，三端對帳與 F3/F9-3/F9-4 皆 docker E2E 驗過。剩餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
 
-1. **協尋/對話 Phase 2**：遺失物處理費真金流（目前記帳式確認）；admin 協尋單總覽頁；
-   聊天訊息 FCM 推播（App 被殺時）與 admin 對話稽核 UI。
+1. **協尋/對話 Phase 2 剩餘**：遺失物處理費真金流（目前記帳式確認）；
+   聊天訊息 FCM 推播（App 被殺時）。~~admin 協尋單總覽＋對話稽核 UI~~ ✅ 2026-07-15
+   （後端 H4 `GET /api/admin/lost-items`＋前端 fleet-frontEnd#11）。
 2. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
 3. **drivers／membership 真分頁**：逼近 `MaxListRows=5000` 上限時，比照 rides 改 offset/keyset 伺服器端分頁（含前端）。
 4. **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加「後台手動校正單筆車資」待產品定。

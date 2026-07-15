@@ -88,6 +88,42 @@ func (r *LostItemRepository) ListByCustomer(customerID int64, statuses []string)
 	return rows, err
 }
 
+// LostItemAdminRow 後台協尋單總覽列（含司機/乘客姓名，供 admin 列表呈現）。
+type LostItemAdminRow struct {
+	ID           int64      `json:"id"`
+	RideID       int64      `json:"ride_id"`
+	CustomerID   int64      `json:"customer_id"`
+	CustomerName string     `json:"customer_name"`
+	DriverID     int64      `json:"driver_id"`
+	DriverName   string     `json:"driver_name"`
+	Description  string     `json:"description"`
+	FeeCents     int64      `json:"fee_cents"`
+	FeeBps       int        `json:"fee_bps"`
+	Status       string     `json:"status"`
+	PaidAt       *time.Time `json:"paid_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// ListAll 後台總覽：全部協尋單（status 空字串為全部），新的在前，上限 MaxListRows。
+func (r *LostItemRepository) ListAll(status string) ([]LostItemAdminRow, error) {
+	var rows []LostItemAdminRow
+	err := r.db.Raw(`
+		SELECT li.id, li.ride_id,
+		       li.customer_id, c.name AS customer_name,
+		       li.driver_id, d.name AS driver_name,
+		       li.description, li.fee_cents, li.fee_bps,
+		       li.status, li.paid_at, li.created_at, li.updated_at
+		FROM lost_item_requests li
+		JOIN customers c ON c.id = li.customer_id
+		JOIN drivers d ON d.id = li.driver_id
+		WHERE (? = '' OR li.status = ?)
+		ORDER BY li.id DESC
+		LIMIT ?
+	`, status, status, MaxListRows).Scan(&rows).Error
+	return rows, err
+}
+
 // TransitionStatus 守門式狀態轉換：僅當現況在 from 之中才改為 to，回傳是否有改到。
 // markPaid 為 true 時一併寫入 paid_at（乘客支付處理費當下）。
 func (r *LostItemRepository) TransitionStatus(id int64, from []string, to string, markPaid bool) (bool, error) {

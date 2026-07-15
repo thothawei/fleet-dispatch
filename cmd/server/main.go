@@ -178,6 +178,7 @@ func main() {
 	)
 	adminHandler.SetFeeSettings(feeSettings)
 	adminHandler.SetMembershipInvoices(membershipInvoiceRepo)
+	adminHandler.SetLostItems(lostItemRepo)
 
 	// 乘客認證：註冊/登入（line_user_id + 密碼 JWT）
 	customerRegistry := service.NewCustomerRegistry(customerRepo)
@@ -270,6 +271,7 @@ func main() {
 				read.GET("/reports/daily", adminHandler.DailyReport)
 				read.GET("/reports/monthly", adminHandler.MonthlyReport)
 				read.GET("/membership-invoices", adminHandler.ListMembershipInvoices)
+				read.GET("/lost-items", adminHandler.ListLostItems)
 				read.GET("/settings/dispatch", adminHandler.GetDispatchSettings)
 			}
 			// dispatcher：派單操作
