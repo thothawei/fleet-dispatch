@@ -71,15 +71,16 @@ func (s *FeeSettings) MonthlyMembershipFeeCents() int64 {
 	return s.monthlyMembershipFeeCents
 }
 
-// Quote 依實際里程（公尺）計算車資、手續費、司機實得（皆為「分」）。
+// Quote 依實際里程（公尺）計算車資、手續費、司機實得（皆為「分」，但一律落在整數元）。
 //
-//	fare       = max(min_fare, base + round(per_km × 距離公尺 / 1000))
-//	commission = round(fare × bps / 10000)
+//	fare       = max(min_fare, roundNtd(base + round(per_km × 距離公尺 / 1000)))  // 車資四捨五入到整數元
+//	commission = floorNtd(fare × bps / 10000)                                    // 手續費無條件捨去到整數元
 //	driver_net = fare − commission
 //
-// 距離為 0 時 fare 會落到 min_fare，不會算成 0；此外呼叫端（TrackingService.Complete）
-// 已對軌跡稀疏/缺失做退路——以 OSRM pickup→dropoff 路線里程作地板（見 billableDistanceM），
-// 故傳進來的 distanceM 通常已是「軌跡 vs 路線」的較大者。
+// 台幣無小數：所有金額都是整數元（分為 100 的倍數），支付/報表不會出現不可支付的小數
+// （min_fare 由設定輸入，本身已是整數元）。距離為 0 時 fare 會落到 min_fare，不會算成 0；
+// 呼叫端（TrackingService.Complete）已對軌跡稀疏/缺失做退路——以 OSRM pickup→dropoff 路線里程
+// 作地板（見 billableDistanceM），故傳進來的 distanceM 通常已是「軌跡 vs 路線」的較大者。
 func (s *FeeSettings) Quote(distanceM int) (fareCents, commissionCents, driverNetCents int64) {
 	s.mu.RLock()
 	base, perKm, minFare, bps := s.baseFareCents, s.perKmFareCents, s.minFareCents, s.commissionBps
@@ -88,11 +89,11 @@ func (s *FeeSettings) Quote(distanceM int) (fareCents, commissionCents, driverNe
 	if distanceM < 0 {
 		distanceM = 0
 	}
-	fareCents = base + roundDiv(perKm*int64(distanceM), 1000)
+	fareCents = roundNtd(base + roundDiv(perKm*int64(distanceM), 1000))
 	if fareCents < minFare {
 		fareCents = minFare
 	}
-	commissionCents = roundDiv(fareCents*int64(bps), 10000)
+	commissionCents = floorNtd(fareCents * int64(bps) / 10000)
 	driverNetCents = fareCents - commissionCents
 	return
 }
@@ -103,6 +104,22 @@ func roundDiv(a, b int64) int64 {
 		return 0
 	}
 	return (a + b/2) / b
+}
+
+// 台幣無小數：金額一律落在整數元（分為 100 的倍數）。
+// roundNtd 把「分」四捨五入到整數元；floorNtd 無條件捨去到整數元（兩者皆假設 cents >= 0）。
+func roundNtd(cents int64) int64 {
+	if cents < 0 {
+		return 0
+	}
+	return roundDiv(cents, 100) * 100
+}
+
+func floorNtd(cents int64) int64 {
+	if cents < 0 {
+		return 0
+	}
+	return (cents / 100) * 100
 }
 
 // Update 覆寫費率設定（nil 欄位表示不變），先驗證、寫 DB，再更新快取。
