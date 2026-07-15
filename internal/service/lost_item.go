@@ -61,7 +61,8 @@ func (s *LostItemService) CreateByCustomer(customerID, rideID int64, description
 		return nil, ErrLostItemExists
 	}
 
-	// 處理費快照：round(車資 × bps / 10000)。無車資的舊行程（如 LINE 建單未計費）費用為 0。
+	// 處理費快照：車資 × bps / 10000，四捨五入到整數元（台幣無小數）。
+	// 無車資的舊行程（如 LINE 建單未計費）費用為 0。
 	bps := s.fees.LostItemFeeBps()
 	var fare int64
 	if ride.FareAmountCents != nil {
@@ -72,7 +73,7 @@ func (s *LostItemService) CreateByCustomer(customerID, rideID int64, description
 		CustomerID:  customerID,
 		DriverID:    *ride.DriverID,
 		Description: description,
-		FeeCents:    roundDiv(fare*int64(bps), 10000),
+		FeeCents:    roundNtd(fare * int64(bps) / 10000),
 		FeeBps:      bps,
 		Status:      constants.LostItemStatusOpen,
 	}

@@ -42,10 +42,10 @@ func TestBillingReports(t *testing.T) {
 		t.Fatalf("建立司機失敗：%v", err)
 	}
 
-	// 兩筆已完成行程，直接帶入定格車資（模擬 F3 完成計費的結果）。
+	// 兩筆已完成行程，直接帶入定格車資（模擬 F3 完成計費的結果；金額皆整數元，手續費已捨去）。
 	fares := []struct{ fare, commission, net int64 }{
-		{18500, 2775, 15725}, // 5km
-		{8500, 1275, 7225},   // 最低車資
+		{18500, 2700, 15800}, // 5km；手續費 15%=2775 捨去到 2700
+		{8500, 1200, 7300},   // 最低車資；手續費 1275 捨去到 1200
 	}
 	for _, f := range fares {
 		fare, commission, net := f.fare, f.commission, f.net
@@ -74,8 +74,8 @@ func TestBillingReports(t *testing.T) {
 	}
 
 	wantRevenue := int64(18500 + 8500)   // 27000
-	wantCommission := int64(2775 + 1275) // 4050
-	wantNet := int64(15725 + 7225)       // 22950
+	wantCommission := int64(2700 + 1200) // 3900
+	wantNet := int64(15800 + 7300)       // 23100
 
 	// F5 日報表
 	daily, err := reports.DailyDriverStats(billTestDate)
@@ -164,7 +164,7 @@ func TestCompleteRideSnapshotsFare(t *testing.T) {
 		t.Fatalf("建立行程失敗：%v", err)
 	}
 
-	fare, commission, net := int64(18500), int64(2775), int64(15725)
+	fare, commission, net := int64(18500), int64(2700), int64(15800)
 	if err := rides.CompleteRide(ride.ID, 5000, &fare, &commission, &net); err != nil {
 		t.Fatalf("CompleteRide 失敗：%v", err)
 	}
