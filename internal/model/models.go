@@ -114,14 +114,24 @@ func (Customer) TableName() string {
 }
 
 type Driver struct {
-	ID           int64     `gorm:"primaryKey"`
-	LineUserID   string    `gorm:"column:line_user_id;uniqueIndex;not null"`
-	Name         string    `gorm:"not null;default:''"`
-	Phone        string    `gorm:"not null;default:''"`
-	Status       int16     `gorm:"not null;default:0"`
+	ID         int64  `gorm:"primaryKey"`
+	LineUserID string `gorm:"column:line_user_id;uniqueIndex;not null"`
+	Name       string `gorm:"not null;default:''"`
+	Phone      string `gorm:"not null;default:''"`
+	Status     int16  `gorm:"not null;default:0"`
+	// VehicleType 車種 code（O1）：constants.VehicleType* 之一；'' 為未設定。
+	// 未設定的司機不得被派單／接單（O3），且它是清潔費（O6）與派單車種過濾（P3）的判斷依據。
+	VehicleType string `gorm:"column:vehicle_type;not null;default:''" json:"vehicle_type"`
+	// PlateNumber 車牌（O1）：非空時唯一（partial unique index），'' 為未設定。
+	PlateNumber  string    `gorm:"column:plate_number;not null;default:''" json:"plate_number"`
 	PasswordHash string    `gorm:"column:password_hash;not null;default:''" json:"-"`
 	CreatedAt    time.Time `gorm:"not null"`
 	UpdatedAt    time.Time `gorm:"not null"`
+}
+
+// HasVehicle 是否已填妥車輛資訊；未填者不得被派單／接單（O3 gate）。
+func (d Driver) HasVehicle() bool {
+	return d.VehicleType != "" && d.PlateNumber != ""
 }
 
 func (Driver) TableName() string {
