@@ -53,6 +53,18 @@ func TestDispatch_publish轉發給Publisher(t *testing.T) {
 	}
 }
 
+func TestRideAssignedPayload_含Pickup座標(t *testing.T) {
+	// 司機端要在地圖標出上車點，只有 address 字串無法定位。
+	ride := &model.Ride{
+		PickupAddress: "台北101",
+		PickupPoint:   model.GeoPoint{Lat: 25.033, Lng: 121.5654},
+	}
+	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200)
+	if payload["pickup_lat"] != 25.033 || payload["pickup_lng"] != 121.5654 {
+		t.Fatalf("pickup 座標錯誤: %v", payload)
+	}
+}
+
 func TestRideAssignedPayload_含Dropoff(t *testing.T) {
 	lat, lng := 25.08, 121.57
 	ride := &model.Ride{
