@@ -161,11 +161,15 @@ func putDropoff(payload map[string]any, ride *model.Ride) {
 }
 
 // rideAssignedPayload 組裝 ride.assigned WS 事件 payload（含選填目的地）。
+// pickup 座標與 dropoff 對稱一併帶上：司機端接單當下就要在地圖標出上車點，
+// 光靠 address 字串無法定位（PickupPoint 為 not null，必定有值）。
 func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM int) map[string]any {
 	payload := map[string]any{
-		"address": pickupAddress,
-		"eta_sec": etaSec,
-		"dist_m":  distM,
+		"address":    pickupAddress,
+		"pickup_lat": ride.PickupPoint.Lat,
+		"pickup_lng": ride.PickupPoint.Lng,
+		"eta_sec":    etaSec,
+		"dist_m":     distM,
 	}
 	putDropoff(payload, ride)
 	return payload
