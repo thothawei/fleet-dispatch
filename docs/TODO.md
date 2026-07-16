@@ -350,12 +350,29 @@
 
 ### 施作項目
 
-- [ ] **O1. `drivers` 加車輛欄位**（新 migration）
-      `vehicle_type`（車種，**選單值**）、`plate_number`（車牌）、`vehicle_color`（可選）。
-      **車種為選單** ✅ 已定案（2026-07-16）：`sedan`（轎車）／`suv`（休旅）／`van7`（七人座）／
-      `accessible`（無障礙）／`pet`（寵物用車）。存 enum 字串或 smallint（實作時定），
-      **顯示名稱在前端對應**，後端只認 code。非白名單值回 400。
-      **車牌唯一性**：建議 `UNIQUE(plate_number)`（同一車牌不該同時掛兩個司機帳號）——待拍板。
+- [x] **O1. `drivers` 加車輛欄位** ✅ **已實作（2026-07-16，migration `000017`）**
+      `vehicle_type`／`plate_number`，沿用 drivers 既有慣例 `TEXT NOT NULL DEFAULT ''`（`''` ＝未設定）。
+      **`vehicle_color` 不做**（YAGNI）：需求只要求顯示車種與車牌，日後要再加。
+
+      **實作時定的兩件事**：
+      1. **車種存字串 + DB CHECK**（非 smallint）：`chk_drivers_vehicle_type`
+         限定 `('', 'sedan', 'suv', 'van7', 'accessible', 'pet')`。
+         放資料層而不只在 API 驗證——它是清潔費（O6）與派單過濾（P3）的判斷依據，值髒掉直接影響計費。
+         Go 端白名單在 `internal/constants/vehicle.go`（`IsValidVehicleType` 刻意**不接受空字串**，
+         避免 API 收到空值當合法而繞過 O3 gate）。
+      2. **車牌唯一性 ✅ 拍板：partial unique index**
+         `uq_drivers_plate_number ON drivers(plate_number) WHERE plate_number <> ''`。
+         **不可用一般 `UNIQUE`**——既有司機 `plate_number` 全是 `''`，一般唯一鍵會讓
+         第二個未填車牌的司機直接插不進去。**已用測試釘住**（反向驗證：改成一般 UNIQUE 該案即 FAIL）。
+
+      **驗收**：`go build`／`vet` 綠；`internal/constants` 單元測試（白名單、防禦性副本）；
+      整合測試（真 PostGIS 容器 + 跑完整 migration）——
+      `TestDriverVehicleSchema`（多筆空車牌不衝突／車牌非空時唯一／CHECK 擋非白名單）、
+      `TestDriverVehicleMigrationReversible`（up → down → 再 up，欄位／CHECK／index 正確消失與回來）。
+      反向驗證：一般 UNIQUE → 空車牌案 FAIL；down 漏 `DROP COLUMN` → 可逆性測試 FAIL。
+
+      **順帶記錄的 Postgres 行為**：`DROP COLUMN` 會自動連帶刪除依賴該欄位的 CHECK 與 index，
+      故 down 裡的 `DROP CONSTRAINT`／`DROP INDEX` 其實冗餘——保留是為了明示意圖（`IF EXISTS`，無害）。
 
 - [ ] **O2. 車輛資訊 API**
       `GET/PUT /api/driver/vehicle`（driver JWT，只能改自己的）。
@@ -430,8 +447,8 @@
 ### 風險與待拍板
 
 1. ~~**車種自由文字 vs 選單**~~ ✅ **已拍板：選單**（轎車／休旅／七人座／無障礙／寵物用車），見 O1。
-2. **車牌格式驗證**：台灣車牌格式多樣（舊式／新式／機車／電動車），過嚴會擋到真司機。
-   建議寬鬆格式 + 後台可修正。
+2. **車牌格式驗證**（O2 要面對，O1 不管格式）：台灣車牌格式多樣（舊式／新式／機車／電動車），
+   過嚴會擋到真司機。建議寬鬆格式 + 後台可修正。**O1 的 DB 層只保證唯一性，不驗格式。**
 3. ~~**既有司機資料**~~ ✅ **已拍板：強制填寫、不設寬限期**，App 端強制跳轉引導，見 O3。
    **營運提醒**：上線當下所有司機都會無法接單，需事前通知。
 4. ~~**車輛異動**~~ ✅ **已拍板：rides 落車輛快照**＋開放司機聯絡方式＋沿用既有 chat 當留言板，見 O7。
