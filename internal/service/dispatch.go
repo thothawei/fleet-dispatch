@@ -169,6 +169,32 @@ func putDropoff(payload map[string]any, ride *model.Ride) {
 	}
 }
 
+// rideAcceptedCustomerPayload 組裝給乘客的 ride.accepted payload（O4／O7）。
+//
+// 車種與車牌讓乘客在路邊對得到車；電話讓乘客能直接聯絡司機（O7 拍板：明碼）。
+// **只送給該趟乘客**——本 payload 的收件人是 ride.CustomerID 一人，
+// 司機電話絕不可出現在任何列表或廣播事件上。
+//
+// 送 code 而非顯示名：前端有自己的車種對照（O1 原則）。
+// 車輛欄位在 O3 gate 下必定非空，但仍以 omitempty 式的判斷帶入——
+// 舊資料或資料異常時，寧可少一個鍵，也不要讓 App 顯示空白車牌。
+func rideAcceptedCustomerPayload(driver *model.Driver, etaSec int) map[string]any {
+	payload := map[string]any{
+		"driver_name": driver.Name,
+		"eta_sec":     etaSec,
+	}
+	if driver.VehicleType != "" {
+		payload["driver_vehicle_type"] = driver.VehicleType
+	}
+	if driver.PlateNumber != "" {
+		payload["driver_plate_number"] = driver.PlateNumber
+	}
+	if driver.Phone != "" {
+		payload["driver_phone"] = driver.Phone
+	}
+	return payload
+}
+
 // rideAssignedPayload 組裝 ride.assigned WS 事件 payload（含選填目的地）。
 // pickup 座標與 dropoff 對稱一併帶上：司機端接單當下就要在地圖標出上車點，
 // 光靠 address 字串無法定位（PickupPoint 為 not null，必定有值）。
@@ -458,7 +484,7 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:    events.TypeRideAccepted,
 		RideID:  rideID,
-		Payload: map[string]any{"driver_name": driver.Name, "eta_sec": etaSec},
+		Payload: rideAcceptedCustomerPayload(driver, etaSec),
 	})
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
 		Type:    events.TypeRideAccepted,

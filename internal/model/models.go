@@ -156,6 +156,10 @@ type Ride struct {
 	// RequiredVehicleType 乘客指定的車種（P1）：constants.VehicleType* 之一；'' ＝不指定（任何車種都可派）。
 	// 這是清潔費（O6）加收與否的判斷依據——依**乘客要的車種**，不是司機開的車種。
 	RequiredVehicleType string `gorm:"column:required_vehicle_type;not null;default:''" json:"required_vehicle_type"`
+	// 車輛快照（O7）：接單時定格司機當下的車種／車牌；'' ＝尚未接單。
+	// 司機日後換車，歷史行程不會跟著變——乘客回頭找遺失物時要知道「當時搭的是哪台車」。
+	DriverVehicleType string `gorm:"column:driver_vehicle_type;not null;default:''" json:"driver_vehicle_type"`
+	DriverPlateNumber string `gorm:"column:driver_plate_number;not null;default:''" json:"driver_plate_number"`
 	// 計費欄位：完成時定格寫入（費率快照制），一律以「分」儲存；未完成/取消為 nil。
 	FareAmountCents       *int64 `gorm:"column:fare_amount_cents" json:"fare_amount_cents"`
 	CommissionAmountCents *int64 `gorm:"column:commission_amount_cents" json:"commission_amount_cents"`

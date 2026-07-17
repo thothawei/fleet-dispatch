@@ -333,16 +333,26 @@ func (r *RideRepository) UpdateStatus(id int64, status int16) error {
 	}).Error
 }
 
+// AcceptRide 司機接單，並在同一個 UPDATE 內定格車輛快照（O7）。
+//
+// 快照以子查詢直接自 drivers 複製，而非由呼叫端傳入：
+//   - 與 driver_id 在同一個 UPDATE 定格，不會有「接了單但快照還沒寫」的中間狀態；
+//   - 呼叫端不可能傳錯車——快照必然是被指派司機當下的車。
+//
+// O3 gate 保證接單者一定填了車輛資訊，故正常情況下快照不會是空字串；
+// COALESCE 只是防禦司機資料異常時仍滿足 NOT NULL。
 func (r *RideRepository) AcceptRide(id, driverID int64, etaSec int) error {
 	now := time.Now()
 	return r.db.Model(&model.Ride{}).Where("id = ? AND status IN ?", id,
 		[]int16{constants.RideStatusRequested, constants.RideStatusAssigned},
 	).Updates(map[string]interface{}{
-		"driver_id":      driverID,
-		"status":         constants.RideStatusAccepted,
-		"accepted_at":    now,
-		"eta_pickup_sec": etaSec,
-		"updated_at":     now,
+		"driver_id":           driverID,
+		"status":              constants.RideStatusAccepted,
+		"accepted_at":         now,
+		"eta_pickup_sec":      etaSec,
+		"driver_vehicle_type": gorm.Expr("COALESCE((SELECT vehicle_type FROM drivers WHERE id = ?), '')", driverID),
+		"driver_plate_number": gorm.Expr("COALESCE((SELECT plate_number FROM drivers WHERE id = ?), '')", driverID),
+		"updated_at":          now,
 	}).Error
 }
 
