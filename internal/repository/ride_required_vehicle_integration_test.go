@@ -1,17 +1,11 @@
 package repository
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	gormpostgres "gorm.io/driver/postgres"
-	"gorm.io/gorm"
 
 	"line-fleet-dispatch/internal/model"
 )
@@ -82,37 +76,8 @@ func TestRideRequiredVehicleTypeSchema(t *testing.T) {
 // P1 migration 可逆性：up → down 到 O1 為止 → 再 up。
 // down 寫壞平常沒人發現，等到要 rollback 才炸。
 func TestRideRequiredVehicleMigrationReversible(t *testing.T) {
-	ctx := context.Background()
-	container, err := tcpostgres.Run(ctx, "postgis/postgis:16-3.4",
-		tcpostgres.WithDatabase("test"),
-		tcpostgres.WithUsername("test"),
-		tcpostgres.WithPassword("test"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	if err != nil {
-		t.Skipf("略過整合測試（Docker/testcontainers 不可用）: %v", err)
-	}
-	t.Cleanup(func() { _ = container.Terminate(ctx) })
-
-	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatalf("取得連線字串失敗: %v", err)
-	}
-
-	m, err := migrate.New("file://../../db/migrations", connStr)
-	if err != nil {
-		t.Fatalf("建立 migrate 失敗: %v", err)
-	}
+	db, m := newMigrateHandle(t)
 	defer m.Close()
-
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		t.Fatalf("up 失敗: %v", err)
-	}
-
-	db, err := gorm.Open(gormpostgres.Open(connStr), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("連線失敗: %v", err)
-	}
 
 	hasColumn := func() bool {
 		var n int64

@@ -46,7 +46,7 @@ func TestLostItemFlow(t *testing.T) {
 		t.Fatalf("標記上車失敗：%v", err)
 	}
 	fare, comm, net := int64(10000), int64(1500), int64(8500)
-	if err := rides.CompleteRide(ride.ID, 3000, &fare, &comm, &net); err != nil {
+	if err := rides.CompleteRide(ride.ID, 3000, &fare, &comm, &net, nil); err != nil {
 		t.Fatalf("完成行程失敗：%v", err)
 	}
 
@@ -81,7 +81,7 @@ func TestLostItemFlow(t *testing.T) {
 
 	// 快照制：調高處理費% 後，既有協尋單金額不變
 	newBps := int64(2000)
-	if err := fees.Update(nil, nil, nil, nil, nil, &newBps, nil); err != nil {
+	if err := fees.Update(nil, nil, nil, nil, nil, &newBps, nil, nil); err != nil {
 		t.Fatalf("更新處理費%%失敗：%v", err)
 	}
 	reloaded, err := svc.GetForRide(events.RoleCustomer, owner.ID, ride.ID)

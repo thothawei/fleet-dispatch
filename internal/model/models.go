@@ -157,11 +157,14 @@ type Ride struct {
 	// 這是清潔費（O6）加收與否的判斷依據——依**乘客要的車種**，不是司機開的車種。
 	RequiredVehicleType string `gorm:"column:required_vehicle_type;not null;default:''" json:"required_vehicle_type"`
 	// 計費欄位：完成時定格寫入（費率快照制），一律以「分」儲存；未完成/取消為 nil。
-	FareAmountCents       *int64    `gorm:"column:fare_amount_cents" json:"fare_amount_cents"`
-	CommissionAmountCents *int64    `gorm:"column:commission_amount_cents" json:"commission_amount_cents"`
-	DriverNetAmountCents  *int64    `gorm:"column:driver_net_amount_cents" json:"driver_net_amount_cents"`
-	CreatedAt             time.Time `gorm:"not null" json:"created_at"`
-	UpdatedAt             time.Time `gorm:"not null" json:"updated_at"`
+	FareAmountCents       *int64 `gorm:"column:fare_amount_cents" json:"fare_amount_cents"`
+	CommissionAmountCents *int64 `gorm:"column:commission_amount_cents" json:"commission_amount_cents"`
+	DriverNetAmountCents  *int64 `gorm:"column:driver_net_amount_cents" json:"driver_net_amount_cents"`
+	// CleaningFeeCents 寵物車清潔費（O6）：僅 RequiredVehicleType == 'pet' 的行程才有值。
+	// 不計入抽成、全額歸司機（DriverNetAmountCents 已含它）；報表的「營業額」不含它。
+	CleaningFeeCents *int64    `gorm:"column:cleaning_fee_cents" json:"cleaning_fee_cents"`
+	CreatedAt        time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt        time.Time `gorm:"not null" json:"updated_at"`
 }
 
 func (Ride) TableName() string {
@@ -170,15 +173,17 @@ func (Ride) TableName() string {
 
 // FleetSettings 費率設定（單列，id 固定為 1）。金額以「分」儲存，手續費以 bps 儲存。
 type FleetSettings struct {
-	ID                        int16     `gorm:"primaryKey" json:"-"`
-	BaseFareCents             int64     `gorm:"column:base_fare_cents;not null" json:"base_fare_cents"`
-	PerKmFareCents            int64     `gorm:"column:per_km_fare_cents;not null" json:"per_km_fare_cents"`
-	MinFareCents              int64     `gorm:"column:min_fare_cents;not null" json:"min_fare_cents"`
-	CommissionBps             int       `gorm:"column:commission_bps;not null" json:"commission_bps"`
-	MonthlyMembershipFeeCents int64     `gorm:"column:monthly_membership_fee_cents;not null" json:"monthly_membership_fee_cents"`
-	LostItemFeeBps            int       `gorm:"column:lost_item_fee_bps;not null" json:"lost_item_fee_bps"`
-	UpdatedBy                 *int64    `gorm:"column:updated_by" json:"updated_by"`
-	UpdatedAt                 time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
+	ID                        int16 `gorm:"primaryKey" json:"-"`
+	BaseFareCents             int64 `gorm:"column:base_fare_cents;not null" json:"base_fare_cents"`
+	PerKmFareCents            int64 `gorm:"column:per_km_fare_cents;not null" json:"per_km_fare_cents"`
+	MinFareCents              int64 `gorm:"column:min_fare_cents;not null" json:"min_fare_cents"`
+	CommissionBps             int   `gorm:"column:commission_bps;not null" json:"commission_bps"`
+	MonthlyMembershipFeeCents int64 `gorm:"column:monthly_membership_fee_cents;not null" json:"monthly_membership_fee_cents"`
+	LostItemFeeBps            int   `gorm:"column:lost_item_fee_bps;not null" json:"lost_item_fee_bps"`
+	// PetCleaningFeeBps 寵物車清潔費%（O6）：上限 3000（30%），由 DB CHECK 與 validateFeeSettings 雙重把關。
+	PetCleaningFeeBps int       `gorm:"column:pet_cleaning_fee_bps;not null" json:"pet_cleaning_fee_bps"`
+	UpdatedBy         *int64    `gorm:"column:updated_by" json:"updated_by"`
+	UpdatedAt         time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
 }
 
 func (FleetSettings) TableName() string {

@@ -390,6 +390,8 @@ func (h *AdminHandler) PutFeeSettings(c *gin.Context) {
 		CommissionBps             *int64 `json:"commission_bps"`
 		MonthlyMembershipFeeCents *int64 `json:"monthly_membership_fee_cents"`
 		LostItemFeeBps            *int64 `json:"lost_item_fee_bps"`
+		// PetCleaningFeeBps 寵物車清潔費%（O6）：硬上限 3000（30%），超過回 400。
+		PetCleaningFeeBps *int64 `json:"pet_cleaning_fee_bps"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
@@ -397,7 +399,8 @@ func (h *AdminHandler) PutFeeSettings(c *gin.Context) {
 	}
 	actorID := middleware.AdminIDFromCtx(c)
 	if err := h.feeSettings.Update(req.BaseFareCents, req.PerKmFareCents, req.MinFareCents,
-		req.CommissionBps, req.MonthlyMembershipFeeCents, req.LostItemFeeBps, &actorID); err != nil {
+		req.CommissionBps, req.MonthlyMembershipFeeCents, req.LostItemFeeBps,
+		req.PetCleaningFeeBps, &actorID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

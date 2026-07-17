@@ -183,6 +183,7 @@ func main() {
 	// 乘客認證：註冊/登入（line_user_id + 密碼 JWT）
 	customerRegistry := service.NewCustomerRegistry(customerRepo)
 	customerHandler := handler.NewCustomerHandler(customerRegistry, cfg.JWTSecret, cfg.JWTExpiryHours)
+	customerHandler.SetFeeSettings(feeSettings) // P5：乘客可讀的唯讀費率（白名單輸出）
 
 	// Routes
 	r.GET("/healthz", healthHandler.Healthz)
@@ -204,6 +205,7 @@ func main() {
 		customerAuthed.Use(middleware.CustomerAuth(cfg.JWTSecret))
 		{
 			customerAuthed.POST("/rides", rideHandler.Create)
+			customerAuthed.GET("/customer/fees", customerHandler.Fees)
 			customerAuthed.GET("/customer/rides/active", rideHandler.ActiveByCustomer)
 			customerAuthed.GET("/customer/rides/:id", rideHandler.GetByCustomer)
 			customerAuthed.POST("/rides/:id/cancel-by-customer", rideHandler.CancelByCustomer)

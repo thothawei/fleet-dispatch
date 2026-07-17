@@ -165,7 +165,7 @@ func TestCompleteRideSnapshotsFare(t *testing.T) {
 	}
 
 	fare, commission, net := int64(18500), int64(2700), int64(15800)
-	if err := rides.CompleteRide(ride.ID, 5000, &fare, &commission, &net); err != nil {
+	if err := rides.CompleteRide(ride.ID, 5000, &fare, &commission, &net, nil); err != nil {
 		t.Fatalf("CompleteRide 失敗：%v", err)
 	}
 
