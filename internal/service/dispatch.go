@@ -29,6 +29,7 @@ type DispatchService struct {
 	settings  *DispatchSettings
 	publisher events.Publisher
 	appNotify *notify.Dispatcher
+	stops     *repository.RideStopRepository
 	audit     rideAuditor
 }
 
@@ -65,6 +66,28 @@ func (s *DispatchService) SetAppNotifier(d *notify.Dispatcher) {
 // SetRideEvents 注入訂單狀態審計寫入；可選，測試可不接。
 func (s *DispatchService) SetRideEvents(repo *repository.RideEventRepository) {
 	s.audit = rideAuditor{events: repo}
+}
+
+// SetStops 注入停靠點 repo（供 ride.assigned／ride.accepted 帶 stops，N4）；可選。
+func (s *DispatchService) SetStops(stops *repository.RideStopRepository) {
+	s.stops = stops
+}
+
+// rideStops 讀該趟停靠點；未注入 repo、單點訂單、或讀取失敗皆回 nil
+// （呼叫端據此不放 stops 鍵）。
+//
+// 讀失敗刻意不擋派單：單點訂單本來就沒有停靠點，多停靠點則退化成「司機端看不到全程」，
+// 仍可依 rides.pickup_point 前往第一個上車點——比整趟派不出去好。
+func (s *DispatchService) rideStops(rideID int64) []model.RideStop {
+	if s.stops == nil {
+		return nil
+	}
+	stops, err := s.stops.ListByRide(rideID)
+	if err != nil {
+		log.Error().Err(err).Int64("ride_id", rideID).Msg("讀取停靠點失敗，本次 payload 不帶 stops")
+		return nil
+	}
+	return stops
 }
 
 // publish nil-safe 事件發佈（未接 Hub 時靜默略過）
@@ -198,7 +221,13 @@ func rideAcceptedCustomerPayload(driver *model.Driver, etaSec int) map[string]an
 // rideAssignedPayload 組裝 ride.assigned WS 事件 payload（含選填目的地）。
 // pickup 座標與 dropoff 對稱一併帶上：司機端接單當下就要在地圖標出上車點，
 // 光靠 address 字串無法定位（PickupPoint 為 not null，必定有值）。
-func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM int) map[string]any {
+// stops 為多乘客／多停靠點行程的全程（N4）：司機**接單前**就要看得到
+// 「A 在哪上、B 在哪下、最終到哪」，才知道要不要接。單點訂單不放這個鍵。
+//
+// 注意（給日後做真 FCM 的人）：目前 App 推播只送 title/body（notify.SendRideOffer 是 stub），
+// stops 只走 WS。真 FCM 上線時 data 值一律是字串，stops 這種結構**必須 JSON 字串化**，
+// App 端解析要防禦（見 pitfall-fcm-data-all-strings：漏掉會讓推播接單直接崩）。
+func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM int, stops []model.RideStop) map[string]any {
 	payload := map[string]any{
 		"address":    pickupAddress,
 		"pickup_lat": ride.PickupPoint.Lat,
@@ -207,14 +236,20 @@ func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM i
 		"dist_m":     distM,
 	}
 	putDropoff(payload, ride)
+	if v := stopViews(stops); v != nil {
+		payload["stops"] = v
+	}
 	return payload
 }
 
 // rideAcceptedDriverPayload 組裝 ride.accepted 推給「司機端」的 payload；
-// 司機接單後直接拿到目的地，不必等 pickup 回應。
-func rideAcceptedDriverPayload(ride *model.Ride) map[string]any {
+// 司機接單後直接拿到目的地與全程停靠點，不必等 pickup 回應。
+func rideAcceptedDriverPayload(ride *model.Ride, stops []model.RideStop) map[string]any {
 	payload := map[string]any{}
 	putDropoff(payload, ride)
+	if v := stopViews(stops); v != nil {
+		payload["stops"] = v
+	}
 	return payload
 }
 
@@ -244,7 +279,7 @@ func (s *DispatchService) pushOffer(ctx context.Context, driver *model.Driver, r
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driver.ID}, events.Event{
 		Type:    events.TypeRideAssigned,
 		RideID:  ride.ID,
-		Payload: rideAssignedPayload(ride, ride.PickupAddress, etaSec, distM),
+		Payload: rideAssignedPayload(ride, ride.PickupAddress, etaSec, distM, s.rideStops(ride.ID)),
 	})
 }
 
@@ -489,7 +524,7 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
 		Type:    events.TypeRideAccepted,
 		RideID:  rideID,
-		Payload: rideAcceptedDriverPayload(ride),
+		Payload: rideAcceptedDriverPayload(ride, s.rideStops(rideID)),
 	})
 
 	return "接單成功", nil

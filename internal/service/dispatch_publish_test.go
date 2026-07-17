@@ -59,7 +59,7 @@ func TestRideAssignedPayload_含Pickup座標(t *testing.T) {
 		PickupAddress: "台北101",
 		PickupPoint:   model.GeoPoint{Lat: 25.033, Lng: 121.5654},
 	}
-	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200)
+	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200, nil)
 	if payload["pickup_lat"] != 25.033 || payload["pickup_lng"] != 121.5654 {
 		t.Fatalf("pickup 座標錯誤: %v", payload)
 	}
@@ -72,7 +72,7 @@ func TestRideAssignedPayload_含Dropoff(t *testing.T) {
 		DropoffAddress: "松山機場",
 		DropoffPoint:   &model.GeoPoint{Lat: lat, Lng: lng},
 	}
-	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200)
+	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200, nil)
 	if payload["address"] != "台北101" {
 		t.Fatalf("address 錯誤: %v", payload["address"])
 	}
@@ -86,7 +86,7 @@ func TestRideAssignedPayload_含Dropoff(t *testing.T) {
 
 func TestRideAssignedPayload_無Dropoff時省略欄位(t *testing.T) {
 	ride := &model.Ride{PickupAddress: "台北101"}
-	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200)
+	payload := rideAssignedPayload(ride, ride.PickupAddress, 300, 1200, nil)
 	if _, ok := payload["dropoff_address"]; ok {
 		t.Fatal("不應有 dropoff_address")
 	}
@@ -101,7 +101,7 @@ func TestRideAcceptedDriverPayload_帶目的地座標(t *testing.T) {
 		DropoffAddress: "松山機場",
 		DropoffPoint:   &model.GeoPoint{Lat: lat, Lng: lng},
 	}
-	payload := rideAcceptedDriverPayload(ride)
+	payload := rideAcceptedDriverPayload(ride, nil)
 	if payload["dropoff_address"] != "松山機場" {
 		t.Fatalf("dropoff_address 錯誤: %v", payload["dropoff_address"])
 	}
@@ -111,7 +111,7 @@ func TestRideAcceptedDriverPayload_帶目的地座標(t *testing.T) {
 }
 
 func TestRideAcceptedDriverPayload_無Dropoff時為空(t *testing.T) {
-	payload := rideAcceptedDriverPayload(&model.Ride{})
+	payload := rideAcceptedDriverPayload(&model.Ride{}, nil)
 	if len(payload) != 0 {
 		t.Fatalf("無目的地時 payload 應為空: %v", payload)
 	}

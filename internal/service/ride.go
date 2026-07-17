@@ -252,10 +252,17 @@ type RideQueryService struct {
 	tracks  *repository.TrackRepository
 	rides   *repository.RideRepository
 	drivers *repository.DriverRepository
+	stops   *repository.RideStopRepository
 }
 
 func NewRideQueryService(tracks *repository.TrackRepository, rides *repository.RideRepository) *RideQueryService {
 	return &RideQueryService{tracks: tracks, rides: rides}
+}
+
+// SetStops 注入停靠點 repo（供司機端 active 帶 stops，N6）；可選——
+// 未注入時單點與多停靠點行程皆可查，只是後者不帶 stops。
+func (s *RideQueryService) SetStops(stops *repository.RideStopRepository) {
+	s.stops = stops
 }
 
 // SetDrivers 注入司機 repo（供乘客端查看司機姓名／電話，O4／O7）；可選——
@@ -315,8 +322,20 @@ func (s *RideQueryService) GetActiveRideByCustomer(customerID int64) (*CustomerR
 }
 
 // GetActiveRideByDriver 找司機目前進行中的訂單（已接/載客中），供 App 中途重啟恢復行程；無則回 (nil, nil)
-func (s *RideQueryService) GetActiveRideByDriver(driverID int64) (*model.Ride, error) {
-	return s.rides.FindActiveByDriver(driverID)
+func (s *RideQueryService) GetActiveRideByDriver(driverID int64) (*DriverRideView, error) {
+	ride, err := s.rides.FindActiveByDriver(driverID)
+	if err != nil || ride == nil {
+		return nil, err
+	}
+	view := &DriverRideView{Ride: ride}
+	// N6：司機要知道下一站是誰、在哪。單點訂單為 nil（omitempty），形狀不變。
+	// 讀失敗不擋——司機仍能依 rides.pickup_point／dropoff_point 執行行程。
+	if s.stops != nil {
+		if stops, err := s.stops.ListByRide(ride.ID); err == nil {
+			view.Stops = stopViews(stops)
+		}
+	}
+	return view, nil
 }
 
 // AuthorizeTrackAccess 授權軌跡端點的多角色存取：admin 全放行、本趟乘客、被指派司機皆可，

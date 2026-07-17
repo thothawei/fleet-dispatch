@@ -143,6 +143,8 @@ func main() {
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
 	rideQueryService.SetDrivers(driverRepo) // O4／O7：乘客查自己訂單時附司機姓名／電話
+	rideQueryService.SetStops(rideStopRepo) // N6：司機端 active 帶全程停靠點
+	rideStopService := service.NewRideStopService(rideRepo, rideStopRepo)
 	chatService := service.NewChatService(rideRepo, rideMessageRepo, hub)
 	lostItemService := service.NewLostItemService(rideRepo, lostItemRepo, feeSettings, hub)
 
@@ -160,6 +162,7 @@ func main() {
 	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, rideQueryService, cfg.JWTSecret, cfg.JWTExpiryHours)
 	driverHandler.SetEarnings(reportRepo, feeSettings)
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
+	rideHandler.SetStops(rideStopService) // N7：司機標記到達／跳過停靠點
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenService)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 	chatHandler := handler.NewChatHandler(chatService)
@@ -236,6 +239,9 @@ func main() {
 			authed.DELETE("/driver/device-token", deviceTokenHandler.UnregisterByDriver)
 			authed.POST("/rides/:id/accept", rideHandler.Accept)
 			authed.POST("/rides/:id/pickup", rideHandler.PickUp)
+			// N7：多停靠點行程的到達／跳過標記（被指派司機限定）
+			authed.POST("/rides/:id/stops/:stop_id/arrive", rideHandler.ArriveStop)
+			authed.POST("/rides/:id/stops/:stop_id/skip", rideHandler.SkipStop)
 			authed.POST("/rides/:id/complete", rideHandler.Complete)
 			authed.POST("/rides/:id/cancel", rideHandler.Cancel)
 			authed.POST("/rides/:id/decline", rideHandler.Decline)

@@ -17,6 +17,7 @@ type RideHandler struct {
 	tracking    *service.TrackingService
 	rides       *service.RideQueryService
 	rideService *service.RideService
+	stops       *service.RideStopService
 }
 
 func NewRideHandler(
@@ -26,6 +27,64 @@ func NewRideHandler(
 	rideService *service.RideService,
 ) *RideHandler {
 	return &RideHandler{dispatch: dispatch, tracking: tracking, rides: rides, rideService: rideService}
+}
+
+// SetStops 注入停靠點服務（供 N7 的到達／跳過標記）；可選。
+func (h *RideHandler) SetStops(stops *service.RideStopService) {
+	h.stops = stops
+}
+
+// stopStatusForErr 停靠點標記的錯誤對應。
+func stopStatusForErr(err error) int {
+	switch {
+	case errors.Is(err, service.ErrForbidden):
+		return http.StatusForbidden
+	case errors.Is(err, service.ErrNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrStopAlreadyHandled), errors.Is(err, service.ErrBadStopState):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// ArriveStop POST /api/rides/:id/stops/:stop_id/arrive — 司機標記已到達該停靠點（N7）。
+// 重複標記或該站已跳過回 409（到達時間是計費與稽核的原始資料，不覆寫）。
+func (h *RideHandler) ArriveStop(c *gin.Context) {
+	h.markStop(c, func(driverID, rideID, stopID int64) error {
+		return h.stops.MarkArrived(driverID, rideID, stopID)
+	})
+}
+
+// SkipStop POST /api/rides/:id/stops/:stop_id/skip — 乘客未出現，司機跳過該停靠點（N7）。
+// 被跳過的站不計入 N5 的計費路線——沒去就沒開那段路。
+func (h *RideHandler) SkipStop(c *gin.Context) {
+	h.markStop(c, func(driverID, rideID, stopID int64) error {
+		return h.stops.MarkSkipped(driverID, rideID, stopID)
+	})
+}
+
+func (h *RideHandler) markStop(c *gin.Context, do func(driverID, rideID, stopID int64) error) {
+	if h.stops == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "多停靠點行程未啟用"})
+		return
+	}
+	rideID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	stopID, err := strconv.ParseInt(c.Param("stop_id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stop_id 格式錯誤"})
+		return
+	}
+	driverID := middleware.DriverIDFromCtx(c)
+	if err := do(driverID, rideID, stopID); err != nil {
+		c.JSON(stopStatusForErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // statusForErr 擁有權錯誤回 403，其餘狀態衝突回 409
