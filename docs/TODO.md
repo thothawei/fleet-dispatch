@@ -304,10 +304,17 @@
       拿掉「由 stops 推導 pickup／dropoff」→ 建單以 `無效的上車座標` FAIL。
       **未驗**：docker compose 全服務 live E2E。
 
-- [ ] **N4. 派單與 ETA**（`dispatch.go`）
-      派單仍以「第一個上車點」找最近司機（現行邏輯不變）。
-      `ride.assigned` payload 加 `stops`（司機接單前就能看到全程）——注意 FCM data 值一律是字串，
-      複雜結構要 JSON 字串化，App 端解析要防禦（見 pitfall-fcm-data-all-strings）。
+- [x] **N4. 派單與 ETA**（`dispatch.go`）✅ **已實作（2026-07-17）**
+      派單邏輯**完全沒動**——仍以 `rides.pickup_point`（＝第一個上車點，N3 已推導）找最近司機。
+      `ride.assigned` 與司機端 `ride.accepted` payload 加 `stops`（司機**接單前**就看得到
+      「A 在哪上、B 在哪下、最終到哪」，才知道要不要接）。單點訂單**不放 stops 鍵**。
+      停靠點座標攤平成 `lat`／`lng`，與既有的 `pickup_lat`／`pickup_lng` 一致，App 端不必另寫解析。
+      讀停靠點失敗**不擋派單**：退化成「司機端看不到全程」，仍可依 `pickup_point` 前往第一個上車點。
+
+      **FCM 註記（盤點後修正）**：TODO 原本提醒「FCM data 要 JSON 字串化」，
+      但**現況根本還沒送 data**——`notify.SendRideOffer` 只送 title/body/ride_id，且實作是 stub
+      （真 FCM 是 A2 待辦）。故 stops 目前**只走 WS**。此提醒已移到
+      `rideAssignedPayload` 的註解，留給日後做真 FCM 的人（見 pitfall-fcm-data-all-strings）。
 
 - [ ] **N5. 計費改吃「全程實際路線」** ✅ **已定案（2026-07-16 使用者拍板）**
       （`internal/osrm/client.go` + `tracking.go` `Complete`）
@@ -335,13 +342,36 @@
 
       車資公式本身（起步＋每公里、整數元、快照制、`min_fare` 地板）**完全不變**。
 
-- [ ] **N6. 司機端行程 API 帶 stops**
-      `GET /api/driver/rides/active`、`ride.accepted` 等回傳 `stops`（含順序與乘客標籤），
-      司機才知道下一站是誰、在哪。
+- [x] **N6. 司機端行程 API 帶 stops** ✅ **已實作（2026-07-17）**
+      `GET /api/driver/rides/active` 回 `DriverRideView`（內嵌 `*model.Ride` → JSON 攤平，
+      **既有欄位一個不少**，只多 `stops`；單點訂單為 `omitempty` 不會多出空陣列）。
+      `ride.accepted` 司機端 payload 同步帶 stops（見 N4）。
+      每個停靠點含 `id`／`seq`／`kind`／`lat`／`lng`／`passenger_label`／`address`，
+      以及 `arrived_at`／`skipped_at`（**只在真的發生時帶**，兩者皆無＝待處理）——
+      司機據此知道「下一站是誰、在哪、處理了沒」。
 
-- [ ] **N7. 到站標記（可選）**
-      司機標記「A 已上車／B 已下車」→ 更新 `ride_stops.arrived_at`。
-      決定是否需要（會影響司機端 UI 複雜度與 picked_up/completed 的語意）。
+- [x] **N7. 到站／跳過標記** ✅ **已實作（2026-07-17）**
+      （原標「可選」；因 2026-07-17 拍板「司機可跳過缺席乘客」而成為必要）
+      `POST /api/rides/:id/stops/:stop_id/arrive`／`POST /api/rides/:id/stops/:stop_id/skip`
+      （driver JWT，被指派司機限定）。
+
+      **授權是重點**：`stop_id` 是**全域遞增**的 → 只驗 ride 歸屬不夠，
+      必須**同時驗 `stop.RideID == rideID`**，否則司機可拿自己的 ride_id 去改別人行程的停靠點。
+      已用測試釘住（**測試本身也踩過坑**：兩個 fixture 各起一個容器時 id 都從 1 開始，
+      「別趟的 stop_id」會撞到自己那趟的同號 stop 而合法通過 → 測試改為在**同一個 DB** 建兩趟）。
+
+      **不覆寫既有事實**：`MarkArrived`／`MarkSkipped` 皆為條件式更新
+      （`WHERE arrived_at IS NULL AND skipped_at IS NULL`），重複標記或狀態已定回 **409**。
+      **已到達的站不得反悔改成跳過**——那會讓 N5 的計費路線少算一段司機真的開過的路。
+      行程已完成／取消時一律 409（計費已定格，改了也不會重算）。
+
+      **驗收**：`go build`／`vet`／`gofmt` 綠。
+      單元：`stopViews`（座標攤平、狀態鍵只在發生時帶、空回 nil）、`rideAssignedPayload`／
+      `rideAcceptedDriverPayload` 帶／不帶 stops。
+      整合（真 PostGIS）：到達與跳過、不覆寫既有事實（重複標記／已到達改跳過皆 409）、
+      **授權邊界三案**（別的司機／別趟的 stop_id／行程不存在）、行程已完成不得標記、`ListForDriver`。
+      **反向驗證**：拿掉 `stop.RideID != rideID` 檢查 → 可標記別趟的停靠點，FAIL。
+      **未驗**：docker compose 全服務 live E2E。
 
 ### 風險與待拍板
 
