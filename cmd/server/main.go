@@ -140,6 +140,7 @@ func main() {
 	trackingService.SetReports(reportRepo) // F9-3：完成時重算每日彙總 daily_driver_earnings
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
+	rideQueryService.SetDrivers(driverRepo) // O4／O7：乘客查自己訂單時附司機姓名／電話
 	chatService := service.NewChatService(rideRepo, rideMessageRepo, hub)
 	lostItemService := service.NewLostItemService(rideRepo, lostItemRepo, feeSettings, hub)
 

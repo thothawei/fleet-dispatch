@@ -178,12 +178,52 @@ func (s *RideService) CreateByCustomer(
 
 // RideQueryService 訂單查詢
 type RideQueryService struct {
-	tracks *repository.TrackRepository
-	rides  *repository.RideRepository
+	tracks  *repository.TrackRepository
+	rides   *repository.RideRepository
+	drivers *repository.DriverRepository
 }
 
 func NewRideQueryService(tracks *repository.TrackRepository, rides *repository.RideRepository) *RideQueryService {
 	return &RideQueryService{tracks: tracks, rides: rides}
+}
+
+// SetDrivers 注入司機 repo（供乘客端查看司機姓名／電話，O4／O7）；可選——
+// 未注入時查詢仍可用，只是不帶司機聯絡資訊。
+func (s *RideQueryService) SetDrivers(drivers *repository.DriverRepository) {
+	s.drivers = drivers
+}
+
+// CustomerRideView 乘客視角的訂單：ride 全欄位（含 O7 車輛快照）＋司機姓名／電話。
+//
+// 內嵌 *model.Ride 讓 JSON 攤平，既有欄位一個不少——App 讀到的形狀只多不變。
+//
+// **車種／車牌讀 ride 的快照**（司機換車後歷史行程不變），
+// **電話讀 drivers 的即時值**（司機換號碼後，乘客要撥得通的是新號碼）。
+// 兩者的正確來源不同，不要「順手」統一。
+type CustomerRideView struct {
+	*model.Ride
+	DriverName string `json:"driver_name,omitempty"`
+	// DriverPhone 明碼（O7 拍板）。**僅該趟乘客可見**——本 struct 只由
+	// 「乘客查自己訂單」的路徑產生，絕不可用於任何列表或對其他角色的回應。
+	DriverPhone string `json:"driver_phone,omitempty"`
+}
+
+// withDriverContact 補上司機姓名／電話；未接單或未注入 drivers 時原樣回傳。
+func (s *RideQueryService) withDriverContact(ride *model.Ride) *CustomerRideView {
+	if ride == nil {
+		return nil
+	}
+	view := &CustomerRideView{Ride: ride}
+	if ride.DriverID == nil || s.drivers == nil {
+		return view
+	}
+	d, err := s.drivers.FindByID(*ride.DriverID)
+	if err != nil {
+		return view // 司機查不到不該讓整筆訂單查詢失敗
+	}
+	view.DriverName = d.Name
+	view.DriverPhone = d.Phone
+	return view
 }
 
 func (s *RideQueryService) TrackGeoJSON(rideID int64) (string, error) {
@@ -195,8 +235,12 @@ func (s *RideQueryService) TrackGeoJSON(rideID int64) (string, error) {
 }
 
 // GetActiveRideByCustomer 找乘客目前進行中的訂單（App 啟動/重連取 ride_id 用），無進行中訂單回 (nil, nil)
-func (s *RideQueryService) GetActiveRideByCustomer(customerID int64) (*model.Ride, error) {
-	return s.rides.FindActiveByCustomer(customerID)
+func (s *RideQueryService) GetActiveRideByCustomer(customerID int64) (*CustomerRideView, error) {
+	ride, err := s.rides.FindActiveByCustomer(customerID)
+	if err != nil || ride == nil {
+		return nil, err
+	}
+	return s.withDriverContact(ride), nil
 }
 
 // GetActiveRideByDriver 找司機目前進行中的訂單（已接/載客中），供 App 中途重啟恢復行程；無則回 (nil, nil)
@@ -227,13 +271,17 @@ func (s *RideQueryService) AuthorizeTrackAccess(role string, subjectID, rideID i
 }
 
 // GetRideForCustomer 乘客查詢單一訂單，附 owner 檢查：訂單不存在回 ErrNotFound，非本人訂單回 ErrForbidden
-func (s *RideQueryService) GetRideForCustomer(customerID, rideID int64) (*model.Ride, error) {
+func (s *RideQueryService) GetRideForCustomer(customerID, rideID int64) (*CustomerRideView, error) {
 	ride, err := s.rides.GetByID(rideID)
 	if err != nil {
 		return nil, ErrNotFound
 	}
+	// 授權必須在補司機聯絡資訊**之前**——這是司機電話明碼外流與否的分界。
+	// 非本人訂單一律 403，拿不到任何司機資訊。
 	if ride.CustomerID != customerID {
 		return nil, ErrForbidden
 	}
-	return ride, nil
+	// 這條路徑也是遺失物協尋回頭查「當時搭哪台車、怎麼聯絡司機」的來源（O7），
+	// 沒有時間限制：行程完成很久之後，本人仍查得到。
+	return s.withDriverContact(ride), nil
 }
