@@ -439,7 +439,52 @@
       司機列表顯示車種車牌；是否需要「車輛審核」狀態（pending/approved）待拍板——
       若需要，O3 的 gate 條件要改成「已審核」而非「有填」。
 
-- [ ] **O6. 寵物用車清潔費** ✅ **已定案（2026-07-16）：比例加收，上限 30%**
+- [x] **O6. 寵物用車清潔費** ✅ **已實作（2026-07-17，migration `000019`）**（定案 2026-07-16：比例加收，上限 30%）
+
+      **計費**（`FeeSettings.Quote`）：簽名改為 `Quote(distanceM int, requiredVehicleType string) RideQuote`。
+      **刻意改簽名而不留舊 wrapper**——留了就是留一個「忘了帶車種＝靜靜不收清潔費」的陷阱；
+      改簽名讓漏改的呼叫點直接編譯不過（實測產品碼只有 `tracking.go` 一處，測試三處）。
+      ```
+      cleaning_fee = floorNtd(fare × pet_cleaning_fee_bps / 10000)   // 僅乘客指定 pet；捨去（利乘客）
+      commission   = floorNtd(fare × commission_bps / 10000)         // 基準只有 fare，清潔費不計入抽成
+      driver_net   = fare − commission + cleaning_fee                // 清潔費全額歸司機
+      ```
+      **判斷依據是 `rides.required_vehicle_type`，不是 `drivers.vehicle_type`**——
+      `Quote` 只吃乘客指定的車種，司機車種根本傳不進去（型別層面就擋掉誤用）。
+
+      **報表分項（與計費同批，不可分開上線）**：`daily_driver_earnings` 加 `cleaning_fee_cents`；
+      `RollupRideDay`／`MonthlyDriverStats`／`DriverMonthlyEarnings` 三段 SQL 同步。
+      營業額（`revenue_cents`）**維持只含車資**；應付總公司＝手續費＋月會費，**不受清潔費影響**。
+      **為什麼不能分兩批**：`net_cents` 來自 `driver_net_amount_cents`，該欄已含清潔費 →
+      不同步加分項欄，司機收入頁的「營業額 − 手續費」就對不上實得（差額正是清潔費），
+      破壞先前打通的三端對帳。等式因此改為 **營業額 − 手續費 + 清潔費 = 實得**（測試直接釘住這條式子）。
+
+      **資料**：`fleet_settings.pet_cleaning_fee_bps`（CHECK `0..3000`，上限進 DB 不只靠 API——
+      這是乘客實際被收的錢，寫錯就是超收）、`rides.cleaning_fee_cents`（nullable，完成時定格）、
+      `daily_driver_earnings.cleaning_fee_cents`（NOT NULL DEFAULT 0，彙總欄一律有值）。
+      非寵物車行程寫 **0 而非 NULL**：「這趟沒加收」與「舊資料沒這個概念」是兩件事。
+
+      **乘客端可見**：`ride.completed` payload 加 `cleaning_fee_cents`，**只在 >0 時帶**——
+      帶 0 會讓 App 顯示一列「清潔費 NT$0」。
+
+      **驗收**：`go build`／`vet`／`gofmt` 綠。
+      單元：清潔費算式（釘住「不計入抽成」的具體數字——正確 2700、誤把清潔費計入基準則為 3300）、
+      只看乘客指定車種（`''`／sedan／suv／van7／accessible 皆不加收）、費率 0 不加收、捨去到整數元、
+      上限 `MaxPetCleaningFeeBps`、**P5 白名單**（`CustomerJSON` 只有一個欄位，內部費率一個都不能出現）。
+      整合（真 PostGIS + Redis）：`TestComplete_指定寵物車落帳清潔費`（定格寫入＋payload 分項）、
+      **`TestComplete_寵物車司機載到未指定的乘客不加收`**（最容易寫錯的一條）、
+      `TestCleaningFeeReports`（報表分項與等式）、`TestFleetSettingsPetCleaningFeeCap`（DB CHECK 擋 3001／負值）、
+      `TestPetCleaningFeeMigrationReversible`。
+      **反向驗證**：清潔費計入抽成基準 → 手續費變 3300，FAIL；`CustomerJSON` 改回 `JSON()` →
+      手續費／月會費整組外洩，FAIL；`Quote` 改吃司機車種 → 未指定的乘客被加收，FAIL。
+      **未驗**：docker compose 全服務 live E2E。
+
+      **下游待同步（本 repo 之外，兩端都會「少一個分項」而非算錯）**：
+      - admin：費率設定頁加 `pet_cleaning_fee_bps`；月報表加清潔費分項欄（`total_cleaning_fee_cents`）。
+      - App：完成卡分項顯示（`CompletedRideSummary` 加 `cleaningFeeCents`）；
+        司機收入頁改用「營業額 − 手續費 + 清潔費 = 實得」（`GET /api/driver/earnings` 已回 `total_cleaning_fee_cents`）。
+
+      原始定案內容如下（保留供對照）：
       **規則** ✅ 觸發條件已拍板（2026-07-16）：**依「乘客指定的車種」加收，不是依司機的車種**——
       乘客叫車時指定 `pet`（寵物用車）的行程，才在車資之上加收清潔費（見 **P. 乘客指定車種**）。
       比例由後台設定，**硬上限 30%**（超過一律拒絕）。
@@ -607,7 +652,17 @@
       3. 實作時機：與 P3 同一批（P3 讓「找不到」變得可能發生，兩者不可分開上線——
          只上 P3 不上 P4，乘客會收到誤導性的泛用取消訊息）。
 
-- [ ] **P5. 乘客可讀的唯讀費率端點** ✅ **已定案（2026-07-16，採建議方案）：新增專用端點**
+- [x] **P5. 乘客可讀的唯讀費率端點** ✅ **已實作（2026-07-17）**（定案 2026-07-16：新增專用端點）
+      **`GET /api/customer/fees`**（customer JWT，唯讀）→ 目前只回 `pet_cleaning_fee_bps`。
+      回的是 `FeeSettings.CustomerJSON()`——**另建的白名單 map，不是把 admin 的 `JSON()` 過濾**。
+      理由如定案所述：過濾式寫法日後新增內部費率欄位時容易忘了濾，白名單預設什麼都不給。
+      讀記憶體快取（與 F4 同源），無額外 DB 負擔。
+      掛既有 `customerAuthed` 群組（`middleware.CustomerAuth`）。
+      **驗收**：`TestCustomerJSON白名單` 逐一斷言 `commission_bps`／`monthly_membership_fee_cents`／
+      起步價／每公里／最低車資／遺失物費率**皆不得出現**，且欄位總數為 1。
+      **反向驗證**：改成 `return s.JSON()` → 測試抓到 `commission_bps` 外洩，FAIL。
+
+      原始定案內容如下（保留供對照）：
       **`GET /api/customer/fees`**（customer JWT，唯讀）：只回乘客該知道的欄位——
       `pet_cleaning_fee_bps`（寵物車清潔費%）；日後乘客需要知道的費率（如起步價，若要做預估）再逐一加入。
       **白名單輸出，絕不可外洩** `commission_bps`（手續費）／`monthly_membership_fee_cents`（月會費）
@@ -645,10 +700,13 @@
   清潔費依乘客指定車種、上限 30%、**不計入抽成**／不降級＋取消原因明確化／customer fees 端點／
   **電話明碼、僅該趟乘客可見**）——**N、O、P 規格完備，可開始實作**，
   建議順序：O1→O2→O3（車輛地基）→ P1→P2→P3＋P4（車種）→ O6＋P5（清潔費）→ O4／O7（乘客可見）→ N（多停靠點，最大塊）。
-  **進度：O1 ✅（2026-07-16）、O2 ✅、O3 ✅、P1 ✅、P2 ✅、P3 ✅、P4 ✅（皆 2026-07-17）
-  → **乘客指定車種整條鏈路已通**：建單帶車種 → 只派同車種 → 找不到就明確取消並帶機器可讀原因。
-  下一項建議 **O6＋P5（清潔費）**——P 章節只剩 P5（`GET /api/customer/fees`），
-  而 O6 的觸發條件（依 `rides.required_vehicle_type` 是否為 `pet`）現在已經存在了。**
+  **進度：O1 ✅（2026-07-16）、O2 ✅、O3 ✅、P1 ✅、P2 ✅、P3 ✅、P4 ✅、O6 ✅、P5 ✅（皆 2026-07-17）
+  → **P 章節全數完成**；O 章節只剩 **O4（乘客端可見車輛資訊）／O5（admin 呈現，可選）／
+  O7（車輛快照＋司機電話＋留言板）**。
+  寵物車清潔費整條鏈路已通：乘客指定 pet → 只派寵物車 → 完成時依**乘客指定的車種**加收 →
+  報表分項（營業額不含、抽成不含、全額歸司機）→ `ride.completed` 帶分項 → 乘客可查費率。
+  下一項建議 **O4＋O7**（都是「乘客端可見的司機/車輛資訊」，共用 `ride.accepted` payload 與
+  rides 快照欄，分開做會改到同一批地方兩次）。**
 
 計費地基 **F1–F8＋F3 里程退路＋F9-1~F9-6＋M 整數台幣 已全數合併進 main**，三端對帳與 F3/F9-3/F9-4 皆 docker E2E 驗過。
 其餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：

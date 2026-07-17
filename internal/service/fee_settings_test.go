@@ -37,10 +37,15 @@ func TestQuote(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fare, comm, net := fs.Quote(tc.distanceM)
+			// 不指定車種（""）＝無清潔費，維持 O6 之前的計費語意。
+			q := fs.Quote(tc.distanceM, "")
+			fare, comm, net := q.FareCents, q.CommissionCents, q.DriverNetCents
 			if fare != tc.wantFare || comm != tc.wantComm || net != tc.wantNet {
 				t.Fatalf("Quote(%d) = (fare=%d, comm=%d, net=%d)，預期 (%d, %d, %d)",
 					tc.distanceM, fare, comm, net, tc.wantFare, tc.wantComm, tc.wantNet)
+			}
+			if q.CleaningFeeCents != 0 {
+				t.Fatalf("未指定車種不該有清潔費，得到 %d", q.CleaningFeeCents)
 			}
 			if fare != comm+net {
 				t.Fatalf("fare(%d) 應等於 commission(%d)+net(%d)", fare, comm, net)
@@ -58,12 +63,12 @@ func TestQuote(t *testing.T) {
 func TestQuoteMinFareFloor(t *testing.T) {
 	// 最低車資高於起步價：距離 0 時 fare 應為 min_fare。
 	fs := newFeeSettingsForTest(5000, 2000, 12000, 1000, 0)
-	fare, comm, net := fs.Quote(0)
-	if fare != 12000 {
-		t.Fatalf("min_fare floor 失效：fare=%d，預期 12000", fare)
+	q := fs.Quote(0, "")
+	if q.FareCents != 12000 {
+		t.Fatalf("min_fare floor 失效：fare=%d，預期 12000", q.FareCents)
 	}
-	if comm != 1200 || net != 10800 {
-		t.Fatalf("commission/net 錯誤：comm=%d net=%d，預期 1200/10800", comm, net)
+	if q.CommissionCents != 1200 || q.DriverNetCents != 10800 {
+		t.Fatalf("commission/net 錯誤：comm=%d net=%d，預期 1200/10800", q.CommissionCents, q.DriverNetCents)
 	}
 }
 
@@ -72,17 +77,25 @@ func TestValidateFeeSettingsRejectsOutOfRange(t *testing.T) {
 	fs := newFeeSettingsForTest(8500, 2000, 8500, 1500, 300000)
 
 	neg := int64(-1)
-	if err := fs.Update(&neg, nil, nil, nil, nil, nil, nil); err != ErrInvalidFeeSettings {
+	if err := fs.Update(&neg, nil, nil, nil, nil, nil, nil, nil); err != ErrInvalidFeeSettings {
 		t.Fatalf("負起步價應被拒，got %v", err)
 	}
 	tooHighBps := int64(10001)
-	if err := fs.Update(nil, nil, nil, &tooHighBps, nil, nil, nil); err != ErrInvalidFeeSettings {
+	if err := fs.Update(nil, nil, nil, &tooHighBps, nil, nil, nil, nil); err != ErrInvalidFeeSettings {
 		t.Fatalf("手續費 bps > 10000 應被拒，got %v", err)
 	}
-	if err := fs.Update(nil, nil, nil, nil, nil, &tooHighBps, nil); err != ErrInvalidFeeSettings {
+	if err := fs.Update(nil, nil, nil, nil, nil, &tooHighBps, nil, nil); err != ErrInvalidFeeSettings {
 		t.Fatalf("遺失物處理費 bps > 10000 應被拒，got %v", err)
 	}
-	if err := fs.Update(nil, nil, nil, nil, nil, &neg, nil); err != ErrInvalidFeeSettings {
+	if err := fs.Update(nil, nil, nil, nil, nil, &neg, nil, nil); err != ErrInvalidFeeSettings {
 		t.Fatalf("負遺失物處理費 bps 應被拒，got %v", err)
+	}
+	// O6：清潔費上限 30%（3000 bps）——這是乘客實際被收的錢，超過一律拒絕。
+	overCap := int64(MaxPetCleaningFeeBps + 1)
+	if err := fs.Update(nil, nil, nil, nil, nil, nil, &overCap, nil); err != ErrInvalidFeeSettings {
+		t.Fatalf("清潔費 bps > 3000 應被拒，got %v", err)
+	}
+	if err := fs.Update(nil, nil, nil, nil, nil, nil, &neg, nil); err != ErrInvalidFeeSettings {
+		t.Fatalf("負清潔費 bps 應被拒，got %v", err)
 	}
 }

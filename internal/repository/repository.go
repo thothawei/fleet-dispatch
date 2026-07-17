@@ -356,8 +356,10 @@ func (r *RideRepository) MarkPickedUp(id int64) error {
 		}).Error
 }
 
-// CompleteRide 完成行程並定格計費欄位（fare/commission/net 為 nil 時該欄位不寫入，維持 NULL）。
-func (r *RideRepository) CompleteRide(id int64, distanceM int, fareCents, commissionCents, driverNetCents *int64) error {
+// CompleteRide 完成行程並定格計費欄位（各欄為 nil 時不寫入，維持 NULL）。
+// cleaningFeeCents 為寵物車清潔費（O6）：非寵物車行程算出來是 0，仍會寫入——
+// 「這趟沒加收（0）」與「舊資料沒有這個概念（NULL）」是兩件事，報表分項要分得出來。
+func (r *RideRepository) CompleteRide(id int64, distanceM int, fareCents, commissionCents, driverNetCents, cleaningFeeCents *int64) error {
 	now := time.Now()
 	updates := map[string]interface{}{
 		"status":       constants.RideStatusCompleted,
@@ -373,6 +375,9 @@ func (r *RideRepository) CompleteRide(id int64, distanceM int, fareCents, commis
 	}
 	if driverNetCents != nil {
 		updates["driver_net_amount_cents"] = *driverNetCents
+	}
+	if cleaningFeeCents != nil {
+		updates["cleaning_fee_cents"] = *cleaningFeeCents
 	}
 	return r.db.Model(&model.Ride{}).Where("id = ? AND status = ?", id, constants.RideStatusPickedUp).
 		Updates(updates).Error
@@ -521,27 +526,37 @@ func (r *ReportRepository) DailyDriverStats(date string) ([]DailyDriverReport, e
 // MonthlyDriverReport 月營運報表每司機一列。MembershipFeeCents / OwedToHqCents
 // 屬「應付總公司」語意，由 handler 依當前費率補上（repo 只回聚合數字）。
 type MonthlyDriverReport struct {
-	DriverID             int64  `json:"driver_id"`
-	DriverName           string `json:"driver_name"`
-	TripCount            int    `json:"trip_count"`
-	TotalRevenueCents    int64  `json:"total_revenue_cents"`
-	TotalCommissionCents int64  `json:"total_commission_cents"`
-	DriverNetCents       int64  `json:"driver_net_cents"`
-	MembershipFeeCents   int64  `json:"membership_fee_cents"`
-	OwedToHqCents        int64  `json:"owed_to_hq_cents"`
+	DriverID   int64  `json:"driver_id"`
+	DriverName string `json:"driver_name"`
+	TripCount  int    `json:"trip_count"`
+	// TotalRevenueCents 營業額＝車資合計，**不含清潔費**（O6）。
+	TotalRevenueCents    int64 `json:"total_revenue_cents"`
+	TotalCommissionCents int64 `json:"total_commission_cents"`
+	// TotalCleaningFeeCents 寵物車清潔費合計（O6）：不計入營業額與抽成，全額歸司機。
+	// DriverNetCents 已含它，故「營業額 − 手續費 + 清潔費 = 實得」。
+	TotalCleaningFeeCents int64 `json:"total_cleaning_fee_cents"`
+	DriverNetCents        int64 `json:"driver_net_cents"`
+	MembershipFeeCents    int64 `json:"membership_fee_cents"`
+	// OwedToHqCents 應付總公司＝手續費＋月會費，**不受清潔費影響**。
+	OwedToHqCents int64 `json:"owed_to_hq_cents"`
 }
 
 // RollupRideDay 於行程完成後，重算該行程所屬 (司機, 台北日) 的彙總桶（F9-3）。
 // 以「重算整桶」而非「+1 增量」實作——冪等、永遠等於 rides 的即時聚合，可安全重跑、自我修復。
 func (r *ReportRepository) RollupRideDay(rideID int64) error {
+	// revenue_cents 只含車資（fare）——清潔費（O6）另立 cleaning_fee_cents 分項，
+	// 它是清潔成本補償、不是營收，且不計入抽成。net_cents 讀 driver_net_amount_cents，
+	// 該欄本身已含清潔費（fare − commission + cleaning），故「營業額 − 手續費 ≠ 實得」，
+	// 差額正是清潔費——報表要靠分項欄才能讓等式重新成立。
 	return r.db.Exec(`
-		INSERT INTO daily_driver_earnings (driver_id, day, trip_count, revenue_cents, commission_cents, net_cents, updated_at)
+		INSERT INTO daily_driver_earnings (driver_id, day, trip_count, revenue_cents, commission_cents, net_cents, cleaning_fee_cents, updated_at)
 		SELECT r2.driver_id,
 		       (r2.completed_at AT TIME ZONE 'Asia/Taipei')::date AS day,
 		       COUNT(*)::int,
 		       COALESCE(SUM(r2.fare_amount_cents), 0)::bigint,
 		       COALESCE(SUM(r2.commission_amount_cents), 0)::bigint,
 		       COALESCE(SUM(r2.driver_net_amount_cents), 0)::bigint,
+		       COALESCE(SUM(r2.cleaning_fee_cents), 0)::bigint,
 		       NOW()
 		FROM rides r2
 		JOIN rides r1 ON r1.id = ?
@@ -549,11 +564,12 @@ func (r *ReportRepository) RollupRideDay(rideID int64) error {
 		  AND (r2.completed_at AT TIME ZONE 'Asia/Taipei')::date = (r1.completed_at AT TIME ZONE 'Asia/Taipei')::date
 		GROUP BY r2.driver_id, (r2.completed_at AT TIME ZONE 'Asia/Taipei')::date
 		ON CONFLICT (driver_id, day) DO UPDATE SET
-		  trip_count       = EXCLUDED.trip_count,
-		  revenue_cents    = EXCLUDED.revenue_cents,
-		  commission_cents = EXCLUDED.commission_cents,
-		  net_cents        = EXCLUDED.net_cents,
-		  updated_at       = NOW()
+		  trip_count         = EXCLUDED.trip_count,
+		  revenue_cents      = EXCLUDED.revenue_cents,
+		  commission_cents   = EXCLUDED.commission_cents,
+		  net_cents          = EXCLUDED.net_cents,
+		  cleaning_fee_cents = EXCLUDED.cleaning_fee_cents,
+		  updated_at         = NOW()
 	`, rideID, constants.RideStatusCompleted).Error
 }
 
@@ -574,6 +590,7 @@ func (r *ReportRepository) MonthlyDriverStats(month string) ([]MonthlyDriverRepo
 			SUM(dde.trip_count)::int AS trip_count,
 			SUM(dde.revenue_cents)::bigint AS total_revenue_cents,
 			SUM(dde.commission_cents)::bigint AS total_commission_cents,
+			SUM(dde.cleaning_fee_cents)::bigint AS total_cleaning_fee_cents,
 			SUM(dde.net_cents)::bigint AS driver_net_cents,
 			COALESCE(MAX(mi.amount_cents), 0)::bigint AS membership_fee_cents,
 			SUM(dde.commission_cents)::bigint + COALESCE(MAX(mi.amount_cents), 0)::bigint AS owed_to_hq_cents
@@ -589,11 +606,16 @@ func (r *ReportRepository) MonthlyDriverStats(month string) ([]MonthlyDriverRepo
 
 // DriverEarnings 單一司機當月收入聚合（F7）。MembershipFeeCents 讀自帳本快照（見下）。
 type DriverEarnings struct {
-	TripCount            int   `json:"trip_count"`
+	TripCount int `json:"trip_count"`
+	// TotalRevenueCents 營業額＝車資合計，**不含清潔費**（O6）。
 	TotalRevenueCents    int64 `json:"total_revenue_cents"`
 	TotalCommissionCents int64 `json:"total_commission_cents"`
-	DriverNetCents       int64 `json:"driver_net_cents"`
-	MembershipFeeCents   int64 `json:"membership_fee_cents"`
+	// TotalCleaningFeeCents 寵物車清潔費合計（O6）：不計入營業額與抽成，全額歸司機。
+	// 司機收入頁的等式因此是「營業額 − 手續費 + 清潔費 = 實得」——少了這個分項，
+	// DriverNetCents 會莫名比「營業額 − 手續費」多一截。
+	TotalCleaningFeeCents int64 `json:"total_cleaning_fee_cents"`
+	DriverNetCents        int64 `json:"driver_net_cents"`
+	MembershipFeeCents    int64 `json:"membership_fee_cents"`
 }
 
 // DriverMonthlyEarnings 查單一司機當月收入（F7）。month 為 YYYY-MM。
@@ -608,6 +630,7 @@ func (r *ReportRepository) DriverMonthlyEarnings(driverID int64, month string) (
 			COALESCE(SUM(trip_count), 0)::int AS trip_count,
 			COALESCE(SUM(revenue_cents), 0)::bigint AS total_revenue_cents,
 			COALESCE(SUM(commission_cents), 0)::bigint AS total_commission_cents,
+			COALESCE(SUM(cleaning_fee_cents), 0)::bigint AS total_cleaning_fee_cents,
 			COALESCE(SUM(net_cents), 0)::bigint AS driver_net_cents,
 			COALESCE(
 				(SELECT amount_cents FROM membership_invoices WHERE driver_id = ? AND period = ?),

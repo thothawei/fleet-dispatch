@@ -272,14 +272,18 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 			Msg("計費里程改用 OSRM 路線里程（軌跡里程偏低）")
 	}
 
-	// 費率快照：完成當下依當前費率算好車資/手續費/實得，定格寫進本筆 ride。
-	// 未注入費率設定時（如部分測試）三者留 NULL，不影響完成流程。
-	var fareCents, commissionCents, driverNetCents *int64
+	// 費率快照：完成當下依當前費率算好車資/手續費/清潔費/實得，定格寫進本筆 ride。
+	// 未注入費率設定時（如部分測試）一律留 NULL，不影響完成流程。
+	//
+	// 清潔費依 **ride.RequiredVehicleType**（乘客指定的車種），**不是** driver.VehicleType：
+	// 乘客沒指定寵物車、卻剛好被派到寵物車司機時不得加收——那位乘客沒有要求寵物服務（O6 拍板）。
+	var fareCents, commissionCents, driverNetCents, cleaningFeeCents *int64
 	if s.fees != nil {
-		f, c, n := s.fees.Quote(distanceM)
-		fareCents, commissionCents, driverNetCents = &f, &c, &n
+		q := s.fees.Quote(distanceM, ride.RequiredVehicleType)
+		fareCents, commissionCents = &q.FareCents, &q.CommissionCents
+		driverNetCents, cleaningFeeCents = &q.DriverNetCents, &q.CleaningFeeCents
 	}
-	if err := s.rides.CompleteRide(rideID, distanceM, fareCents, commissionCents, driverNetCents); err != nil {
+	if err := s.rides.CompleteRide(rideID, distanceM, fareCents, commissionCents, driverNetCents, cleaningFeeCents); err != nil {
 		return err
 	}
 	// F9-3：重算該 (司機,日) 的預聚合彙總（冪等）。best-effort——rides 仍是真源，
@@ -296,6 +300,11 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 	completedPayload := map[string]any{"distance_m": distanceM}
 	if fareCents != nil {
 		completedPayload["fare_amount_cents"] = *fareCents // 供乘客端完成卡顯示車資（E2）
+	}
+	// 清潔費分項（O6）：完成卡不可只給總額，要能拆出「車資 NT$X ＋ 清潔費 NT$Y」。
+	// 只在真的有加收時帶（>0）——沒加收卻帶 0 會讓 App 顯示一列「清潔費 NT$0」。
+	if cleaningFeeCents != nil && *cleaningFeeCents > 0 {
+		completedPayload["cleaning_fee_cents"] = *cleaningFeeCents
 	}
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:    events.TypeRideCompleted,
