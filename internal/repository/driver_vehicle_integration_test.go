@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -58,6 +59,61 @@ func TestDriverVehicleSchema(t *testing.T) {
 		}
 		if !strings.Contains(strings.ToLower(err.Error()), "chk_drivers_vehicle_type") {
 			t.Fatalf("應由 chk_drivers_vehicle_type 擋下，實際錯誤: %v", err)
+		}
+	})
+}
+
+// O2：UpdateVehicle 的寫入與唯一鍵衝突翻譯。
+func TestDriverRepositoryUpdateVehicle(t *testing.T) {
+	db := newMigratedTestDB(t)
+	repo := NewDriverRepository(db)
+
+	create := func(lineID string) *model.Driver {
+		d := &model.Driver{LineUserID: lineID, Name: "測試司機"}
+		if err := db.Create(d).Error; err != nil {
+			t.Fatalf("建立司機失敗: %v", err)
+		}
+		return d
+	}
+
+	t.Run("寫入車種車牌", func(t *testing.T) {
+		d := create("u_upd_1")
+		if err := repo.UpdateVehicle(d.ID, "pet", "ABC-1234"); err != nil {
+			t.Fatalf("更新車輛資訊應成功: %v", err)
+		}
+		got, err := repo.FindByID(d.ID)
+		if err != nil {
+			t.Fatalf("重讀司機失敗: %v", err)
+		}
+		if got.VehicleType != "pet" || got.PlateNumber != "ABC-1234" {
+			t.Fatalf("車輛資訊未寫入，得到 %q / %q", got.VehicleType, got.PlateNumber)
+		}
+		if !got.HasVehicle() {
+			t.Fatal("填妥車種車牌後 HasVehicle() 應為 true（O3 gate 的條件）")
+		}
+	})
+
+	t.Run("車牌被別人用走回 ErrPlateTaken", func(t *testing.T) {
+		// 唯一索引衝突若原樣往上丟，handler 會回 500；司機看到的是「伺服器錯誤」
+		// 而非「這張車牌已被使用」，無從修正。
+		owner := create("u_upd_owner")
+		if err := repo.UpdateVehicle(owner.ID, "sedan", "XYZ-5678"); err != nil {
+			t.Fatalf("第一位司機設定車牌應成功: %v", err)
+		}
+		other := create("u_upd_other")
+		err := repo.UpdateVehicle(other.ID, "suv", "XYZ-5678")
+		if !errors.Is(err, ErrPlateTaken) {
+			t.Fatalf("預期 ErrPlateTaken，得到 %v", err)
+		}
+	})
+
+	t.Run("同一司機重設同一車牌不算衝突", func(t *testing.T) {
+		d := create("u_upd_same")
+		if err := repo.UpdateVehicle(d.ID, "sedan", "SAME-001"); err != nil {
+			t.Fatalf("首次設定應成功: %v", err)
+		}
+		if err := repo.UpdateVehicle(d.ID, "suv", "SAME-001"); err != nil {
+			t.Fatalf("同一司機沿用自己的車牌換車種應成功: %v", err)
 		}
 	})
 }

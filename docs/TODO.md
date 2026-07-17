@@ -374,9 +374,36 @@
       **順帶記錄的 Postgres 行為**：`DROP COLUMN` 會自動連帶刪除依賴該欄位的 CHECK 與 index，
       故 down 裡的 `DROP CONSTRAINT`／`DROP INDEX` 其實冗餘——保留是為了明示意圖（`IF EXISTS`，無害）。
 
-- [ ] **O2. 車輛資訊 API**
-      `GET/PUT /api/driver/vehicle`（driver JWT，只能改自己的）。
-      驗證：車種必填、車牌必填且格式檢查（台灣車牌格式待拍板，例如 `ABC-1234`／`1234-AB`）。
+- [x] **O2. 車輛資訊 API** ✅ **已實作（2026-07-17）**
+      `GET/PUT /api/driver/vehicle`（driver JWT，`driver_id` 一律取自 token，只能改自己的）。
+      回應形狀 `{vehicle_type, plate_number, has_vehicle}`——附 `has_vehicle` 是為了讓 App
+      不必自行判斷「兩欄皆非空」，與 O3 gate 用同一條件（`model.Driver.HasVehicle()`）。
+      未設定時兩欄回空字串、`has_vehicle=false`，非錯誤。
+
+      **車牌格式 ✅ 拍板（2026-07-17）：寬鬆驗證**
+      只檢查長度（2–10）與字元集（半形 `A-Z`／`0-9`／`-`，至少一個英數字），**不綁特定樣式**。
+      台灣車牌多代並存（`ABC-1234`／`1234-AB`／`AB-1234`／電動車／機車格式），
+      硬綁正則會誤擋真車牌；擋不住的髒值由 O3 gate 與人工審核（O5，若做）兜底。
+      實作在 `constants.IsValidPlateNumber`／`NormalizePlateNumber`（去空白＋轉大寫）。
+      **正規化是唯一索引的前提**：不轉大寫去空白，同一台車會以
+      「abc-1234」「ABC-1234」各佔一列，`uq_drivers_plate_number`（O1）形同虛設。
+
+      **狀態碼**：車種非白名單／車牌格式錯／任一為空 → 400；車牌已被他人使用 → **409**；
+      司機不存在 → 404。409 的關鍵是 `repository.UpdateVehicle` 把唯一索引衝突翻成
+      `ErrPlateTaken`——原樣往上丟會變 500，司機看到「伺服器錯誤」而無從修正。
+      衝突判斷用 `pgconn.PgError` 的 SQLSTATE `23505` ＋約束名，**不比對錯誤訊息字串**
+      （訊息隨 Postgres 版本／語系變動）；`jackc/pgx/v5` 因此從 indirect 升為 direct 依賴。
+
+      **驗收**：`go build`／`vet`／`gofmt` 綠。
+      `internal/constants` 單元測試（正規化、寬鬆驗證的合法／非法各案，含全形字元不視為合法）；
+      `internal/handler` 測試（授權邊界：無 token／customer token 皆 401；參數驗證 8 案皆 400）；
+      `internal/service` 整合測試 `TestDriverSetVehicle`（真 PostGIS：正規化後才寫入、
+      驗證失敗不留半套資料、大小寫不同但同一車牌仍撞 `ErrPlateTaken`、司機不存在回 `ErrNotFound`）；
+      `internal/repository` 整合測試 `TestDriverRepositoryUpdateVehicle`（寫入、`ErrPlateTaken`、
+      同一司機沿用自己車牌換車種不算衝突）。
+      **反向驗證**：拿掉衝突翻譯 → 錯誤原樣為 SQLSTATE 23505，對應測試 FAIL；
+      拿掉 `NormalizePlateNumber` → 正規化與車牌衝突兩案 FAIL。
+      **未驗**：docker compose 起全服務的 live E2E（單元＋整合已覆蓋，留待 O3 一起跑）。
 
 - [ ] **O3. 接單前置檢查（gate）** ✅ **已定案（2026-07-16）：強制填寫，無寬限期**
       **後端強制**：無車輛資訊的司機不得被派單（`dispatch.go` 候選司機過濾）
@@ -548,6 +575,7 @@
   清潔費依乘客指定車種、上限 30%、**不計入抽成**／不降級＋取消原因明確化／customer fees 端點／
   **電話明碼、僅該趟乘客可見**）——**N、O、P 規格完備，可開始實作**，
   建議順序：O1→O2→O3（車輛地基）→ P1→P2→P3＋P4（車種）→ O6＋P5（清潔費）→ O4／O7（乘客可見）→ N（多停靠點，最大塊）。
+  **進度：O1 ✅（2026-07-16）、O2 ✅（2026-07-17，含車牌寬鬆驗證拍板）→ 下一項是 O3（接單 gate）。**
 
 計費地基 **F1–F8＋F3 里程退路＋F9-1~F9-6＋M 整數台幣 已全數合併進 main**，三端對帳與 F3/F9-3/F9-4 皆 docker E2E 驗過。
 其餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：

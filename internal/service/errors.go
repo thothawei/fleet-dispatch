@@ -14,4 +14,6 @@ var (
 	ErrBadRole            = errors.New("角色無效")
 	ErrSelfLockout        = errors.New("不可對自己執行此操作")
 	ErrLastSuperadmin     = errors.New("不可移除最後一個 superadmin")
+	ErrInvalidVehicleType = errors.New("車種無效")
+	ErrInvalidPlateNumber = errors.New("車牌格式錯誤")
 )
