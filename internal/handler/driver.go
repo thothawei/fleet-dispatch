@@ -140,17 +140,32 @@ func (h *DriverHandler) Earnings(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// 會費以 membership_invoices 帳本快照為單一真源（repo 讀出），不再用即時費率——
-	// 未產生帳單者為 0；應付總公司 = 手續費 + 帳本會費。與月報表 F6 同源、不會分歧。
-	c.JSON(http.StatusOK, gin.H{
-		"month":                  month,
-		"trip_count":             e.TripCount,
-		"total_revenue_cents":    e.TotalRevenueCents,
-		"total_commission_cents": e.TotalCommissionCents,
-		"driver_net_cents":       e.DriverNetCents,
-		"membership_fee_cents":   e.MembershipFeeCents,
-		"owed_to_hq_cents":       e.TotalCommissionCents + e.MembershipFeeCents,
-	})
+	c.JSON(http.StatusOK, driverEarningsJSON(month, e))
+}
+
+// driverEarningsJSON 組裝司機收入回應（F7）。
+//
+// 抽成純函式是為了讓「回應含哪些欄位」可被單元測試釘住——這支手動逐欄組 map，
+// repo 的 struct 新增欄位時**不會**自動出現在回應裡（O6 的清潔費分項就這樣漏過一次，
+// 由 live E2E 才抓到）。
+//
+// 會費以 membership_invoices 帳本快照為單一真源（repo 讀出），不再用即時費率——
+// 未產生帳單者為 0；應付總公司 = 手續費 + 帳本會費，**不受清潔費影響**。與月報表 F6 同源。
+//
+// total_cleaning_fee_cents（O6）**不可省略**：driver_net 已含清潔費，少了這個分項，
+// 司機收入頁的「營業額 − 手續費」就對不上實得（差額正是清潔費，司機會看到憑空多出一截）。
+// 正確等式：**營業額 − 手續費 + 清潔費 = 實得**。
+func driverEarningsJSON(month string, e repository.DriverEarnings) gin.H {
+	return gin.H{
+		"month":                    month,
+		"trip_count":               e.TripCount,
+		"total_revenue_cents":      e.TotalRevenueCents,
+		"total_commission_cents":   e.TotalCommissionCents,
+		"total_cleaning_fee_cents": e.TotalCleaningFeeCents,
+		"driver_net_cents":         e.DriverNetCents,
+		"membership_fee_cents":     e.MembershipFeeCents,
+		"owed_to_hq_cents":         e.TotalCommissionCents + e.MembershipFeeCents,
+	}
 }
 
 // Online POST /api/driver/online — 顯式上線（設為待命，重新進入派單池）
