@@ -140,6 +140,7 @@ func main() {
 	trackingService.SetFeeSettings(feeSettings)
 	trackingService.SetOSRM(osrm)          // F3：軌跡里程偏低時以 OSRM 路線里程作計費地板
 	trackingService.SetReports(reportRepo) // F9-3：完成時重算每日彙總 daily_driver_earnings
+	trackingService.SetStops(rideStopRepo) // N5：多停靠點行程改用全程多點路線計費
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
 	rideQueryService.SetDrivers(driverRepo) // O4／O7：乘客查自己訂單時附司機姓名／電話

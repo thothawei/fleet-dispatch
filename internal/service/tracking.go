@@ -39,6 +39,7 @@ type TrackingService struct {
 	fees      *FeeSettings
 	osrm      *osrmclient.Client
 	reports   *repository.ReportRepository
+	stops     *repository.RideStopRepository
 
 	etaMinInterval   time.Duration
 	etaDistThreshold float64
@@ -91,6 +92,12 @@ func (s *TrackingService) SetOSRM(osrm *osrmclient.Client) {
 // SetReports 注入報表 repo，完成行程時重算該 (司機,日) 的預聚合彙總（F9-3）；可選。
 func (s *TrackingService) SetReports(reports *repository.ReportRepository) {
 	s.reports = reports
+}
+
+// SetStops 注入停靠點 repo，完成計費時改用全程多點路線（N5）；可選——
+// 未注入時多停靠點行程會退回兩點直達路線（會低估繞路，但不會失敗）。
+func (s *TrackingService) SetStops(stops *repository.RideStopRepository) {
+	s.stops = stops
 }
 
 // publish nil-safe 事件發佈
@@ -248,6 +255,61 @@ func billableDistanceM(trackM, routeM int) int {
 	return trackM
 }
 
+// routeDistanceM 計費用的路線里程（公尺）；-1 ＝無路線可用（呼叫端改用軌跡里程）。
+//
+// 多停靠點行程（N5 拍板 2026-07-16）走**全程實際路線**：起點 → 各停靠點 → 最終目的地，
+// **含繞路**。司機真的開了那些路，繞路不該做白工；用「起點→終點」的直達路線會嚴重低估。
+//
+// **已跳過的停靠點不計入**（2026-07-17 拍板的衍生結論）：乘客沒出現、司機沒去那站，
+// 就沒開那段路，計入等於收乘客沒走的路的錢。軌跡那側本來就自然反映（沒去就沒軌跡）。
+//
+// 單點訂單、未注入停靠點 repo、或跳過後不足兩點時，一律退回現行的兩點直達路線。
+func (s *TrackingService) routeDistanceM(ctx context.Context, ride *model.Ride) int {
+	if s.osrm == nil {
+		return -1
+	}
+	if pts := s.billableStopPoints(ride.ID); len(pts) >= 2 {
+		_, routeM, err := s.osrm.RouteVia(ctx, pts)
+		if err == nil {
+			log.Info().Int64("ride_id", ride.ID).Int("stops", len(pts)).Int("route_m", routeM).
+				Msg("計費里程改用全程多點路線（多停靠點行程）")
+			return routeM
+		}
+		log.Error().Err(err).Int64("ride_id", ride.ID).Msg("多點路線計算失敗，退回兩點直達路線")
+	}
+	if ride.DropoffPoint == nil {
+		return -1
+	}
+	_, routeM, _ := s.osrm.RouteDuration(ctx,
+		ride.PickupPoint.Lat, ride.PickupPoint.Lng,
+		ride.DropoffPoint.Lat, ride.DropoffPoint.Lng)
+	return routeM
+}
+
+// billableStopPoints 依序回傳「要計費」的停靠點座標——即未被跳過者。
+// 單點訂單或讀取失敗回 nil（呼叫端退回兩點路線）。
+//
+// 不必另外把 ride.PickupPoint 補進去：N3 已保證 rides.pickup_point ＝ 第一個 pickup stop、
+// dropoff_point ＝ seq 最大的 dropoff stop，兩者本來就在 stops 裡。
+func (s *TrackingService) billableStopPoints(rideID int64) []osrmclient.Point {
+	if s.stops == nil {
+		return nil
+	}
+	stops, err := s.stops.ListByRide(rideID)
+	if err != nil {
+		log.Error().Err(err).Int64("ride_id", rideID).Msg("讀取停靠點失敗，計費改用兩點直達路線")
+		return nil
+	}
+	pts := make([]osrmclient.Point, 0, len(stops))
+	for _, st := range stops {
+		if st.Skipped() {
+			continue // 沒去就沒開那段路
+		}
+		pts = append(pts, osrmclient.Point{Lat: st.Point.Lat, Lng: st.Point.Lng})
+	}
+	return pts
+}
+
 func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) error {
 	ride, err := s.rides.GetByID(rideID)
 	if err != nil {
@@ -257,15 +319,10 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 		return ErrForbidden
 	}
 	trackM, _ := s.rides.TrackDistanceM(rideID)
-	// F3 退路：GPS 軌跡里程可能為 0 或稀疏而偏低。有目的地座標且已注入 OSRM 時，
-	// 以 OSRM pickup→dropoff 路線里程作地板，計費里程取「軌跡 vs 路線」大者——
-	// 軌跡真的長於路線＝司機繞路，仍照實計；軌跡偏低則用路線里程補回。
-	routeM := -1
-	if s.osrm != nil && ride.DropoffPoint != nil {
-		_, routeM, _ = s.osrm.RouteDuration(ctx,
-			ride.PickupPoint.Lat, ride.PickupPoint.Lng,
-			ride.DropoffPoint.Lat, ride.DropoffPoint.Lng)
-	}
+	// F3 退路：GPS 軌跡里程可能為 0 或稀疏而偏低。以 OSRM 路線里程作地板，
+	// 計費里程取「軌跡 vs 路線」大者——軌跡真的長於路線＝司機繞路，仍照實計；
+	// 軌跡偏低則用路線里程補回。**取大者的邏輯不變**（N5），只有 routeM 的算法要改。
+	routeM := s.routeDistanceM(ctx, ride)
 	distanceM := billableDistanceM(trackM, routeM)
 	if routeM > trackM {
 		log.Info().Int64("ride_id", rideID).Int("track_m", trackM).Int("route_m", routeM).
