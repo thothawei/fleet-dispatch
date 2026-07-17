@@ -124,6 +124,11 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		if !driver.HasVehicle() {
 			continue
 		}
+		// P3：乘客指定車種時只派同車種的司機。**不降級**（P4 拍板）——寵物車／無障礙車是硬需求，
+		// 默默改派一般車＝服務失敗還照收錢；找不到就讓它走 giveUpIfUnaccepted 明確取消。
+		if ride.RequiredVehicleType != "" && driver.VehicleType != ride.RequiredVehicleType {
+			continue
+		}
 		targets = append(targets, driver)
 	}
 
@@ -236,13 +241,36 @@ func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
 		events.TypeRideCancelled, events.ActorSystem, nil, "dispatch_timeout")
 	s.redis.ClearRejected(ctx, rideID)
 	log.Warn().Int64("ride_id", rideID).Msg("逾時無人接單，訂單自動取消")
+
+	reason, text, payload := giveUpCancelInfo(ride)
 	if customerLineID, err := s.rides.GetCustomerLineUserID(rideID); err == nil && customerLineID != "" {
-		_ = s.line.PushText(ctx, customerLineID, "抱歉，附近暫無可用司機，請稍後再試")
+		_ = s.line.PushText(ctx, customerLineID, text)
 	}
+	log.Warn().Int64("ride_id", rideID).Str("cancel_reason", reason).Msg("逾時取消原因")
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
-		Type:   events.TypeRideCancelled,
-		RideID: rideID,
+		Type:    events.TypeRideCancelled,
+		RideID:  rideID,
+		Payload: payload,
 	})
+}
+
+// giveUpCancelInfo 組出逾時取消的原因、給乘客的文案與 WS payload（P4）。
+// 指定了車種卻沒人接，多半是「附近沒有這種車」而非「沒有司機」——泛用文案會誤導乘客
+// 一直重試，而正確的引導是「改用不指定車種」。payload 帶機器可讀欄位，
+// App 端不必去 parse 文案字串。
+func giveUpCancelInfo(ride *model.Ride) (reason, text string, payload map[string]any) {
+	if ride.RequiredVehicleType == "" {
+		return constants.CancelReasonNoDriver,
+			"抱歉，附近暫無可用司機，請稍後再試",
+			map[string]any{"cancel_reason": constants.CancelReasonNoDriver}
+	}
+	name := constants.VehicleTypeDisplayName(ride.RequiredVehicleType)
+	return constants.CancelReasonNoVehicleOfType,
+		fmt.Sprintf("抱歉，附近暫無%s，請稍後再試", name),
+		map[string]any{
+			"cancel_reason":         constants.CancelReasonNoVehicleOfType,
+			"required_vehicle_type": ride.RequiredVehicleType,
+		}
 }
 
 // CancelByCustomer 客戶主動取消進行中的訂單（尚未上車前）——LINE 入口，以 line_user_id 找目前進行中的訂單

@@ -44,6 +44,28 @@ func IsValidVehicleType(s string) bool {
 	return false
 }
 
+// vehicleTypeNames 車種 code 的中文顯示名。
+//
+// 一般原則仍是「後端只認 code，顯示名由前端對應」（O1）——這份對照表**只給後端自產的文案用**，
+// 也就是 LINE 推播（例如「附近暫無寵物用車」，P4）：那些字串是後端組的，沒有前端可以對應。
+// API／WS payload 一律只送 code，不要送顯示名。
+var vehicleTypeNames = map[string]string{
+	VehicleTypeSedan:      "轎車",
+	VehicleTypeSUV:        "休旅車",
+	VehicleTypeVan7:       "七人座",
+	VehicleTypeAccessible: "無障礙車",
+	VehicleTypePet:        "寵物用車",
+}
+
+// VehicleTypeDisplayName 回傳車種的中文顯示名；未知 code（含空字串）回「可用車輛」，
+// 讓文案在資料異常時仍讀得通，而不是出現空白或原始 code。
+func VehicleTypeDisplayName(code string) string {
+	if name, ok := vehicleTypeNames[code]; ok {
+		return name
+	}
+	return "可用車輛"
+}
+
 // 車牌長度界線（正規化後）。台灣現行最長為 `ABC-1234`（8 碼），
 // 放寬到 10 是為了容納舊式與特殊車牌。
 const (

@@ -526,24 +526,77 @@
 
 ### 施作項目
 
-- [ ] **P1. `rides` 加 `required_vehicle_type`**（新 migration，接在 O1 之後）
-      選填（null／空＝不指定，任何車種都可派）；值域同 O1 的車種 code 白名單。
-      **必須存在 ride 上**（不是只當派單參數）——清潔費、報表、稽核都要回頭看「這趟乘客要的是什麼車」。
+- [x] **P1. `rides` 加 `required_vehicle_type`** ✅ **已實作（2026-07-17，migration `000018`）**
+      值域同 O1 的車種 code 白名單，由 `chk_rides_required_vehicle_type` 把關（與 O1 同理由：
+      這是清潔費 O6 加收與否的判斷依據，值髒掉直接影響計費，最後防線要在資料層）。
+      **存在 ride 上**（不是只當派單參數）——清潔費、報表、稽核都要回頭看「這趟乘客要的是什麼車」。
 
-- [ ] **P2. 叫車 API 帶車種**（`POST /api/rides`）
-      request 加選填 `required_vehicle_type`；非白名單值回 400。
-      未帶＝維持現行行為（不過濾車種），**不可破壞既有 App／LINE 建單**。
+      **實作時定的一件事**：規格寫「null／空＝不指定」，實作採 **`TEXT NOT NULL DEFAULT ''`**（沿用 O1 慣例），
+      **不用 NULL**——否則「未指定」會有 NULL 與 `''` 兩種表示法，每個過濾條件都得同時處理兩者，
+      遲早有一條路徑漏掉。既有訂單一律為 `''`（不指定），維持現行行為。
 
-- [ ] **P3. 派單依車種過濾**（`dispatch.go` 候選司機迴圈）
-      現行：
-      ```go
-      driver, err := s.drivers.FindByID(id)
-      if err != nil || driver.Status != constants.DriverStatusIdle { continue }
-      ```
-      加上：`ride.RequiredVehicleType != "" && driver.VehicleType != ride.RequiredVehicleType` → skip。
-      注意這與 O3 的 gate 疊加（無車輛資料的司機本來就不得被派單）。
+      **驗收**：`go build`／`vet`／`gofmt` 綠；`internal/repository` 整合測試（真 PostGIS + 跑完整 migration）——
+      `TestRideRequiredVehicleTypeSchema`（**既有建單路徑預設為不指定**：`RideRepository.Create` 走 raw INSERT
+      且不含新欄位，DB default 必須生效，否則既有 App／LINE 建單全掛／白名單皆可寫入／非白名單由 CHECK 擋下）、
+      `TestRideRequiredVehicleMigrationReversible`（up → down 到 v17 → 再 up）。
+      **反向驗證**：拿掉 CHECK → 非白名單案 FAIL。
 
-- [ ] **P4. 「找不到指定車種」的行為** ✅ **已定案（2026-07-16，採建議方案）：不降級＋取消原因明確化**
+      **順帶修掉一個既有測試的隱含假設**：`TestDriverVehicleMigrationReversible`（O1）用 `m.Steps(-1)`
+      驗自己的 down，隱含「O1 是最後一個 migration」。P1 一加，那步卸的就變成 P1，**O1 的 down 會安靜地失去覆蓋**。
+      已改為先 `m.Migrate(17)` 再 `Steps(-1)`，P1 的測試同樣以版本表達意圖。
+      **反向驗證**：拿掉該修正 → O1 測試 FAIL（`down 後不應還有欄位 vehicle_type`）。
+      **日後新增 migration 者注意**：可逆性測試要用版本導向，別用「往回一步」。
+
+- [x] **P2. 叫車 API 帶車種**（`POST /api/rides`）✅ **已實作（2026-07-17）**
+      request 加選填 `required_vehicle_type`；未帶＝不指定，維持現行行為。
+      非白名單值 → `ErrInvalidVehicleType` → **400**（`createStatusForErr` 新增映射）。
+      驗證放在 service 而非仰賴 DB CHECK：撞 CHECK 會變成 500，乘客看到「伺服器錯誤」而不知道是車種填錯。
+
+      **改動四處**（缺一不可）：handler request struct → `CustomerCreateRequest` →
+      `CreateByCustomer` 驗證＋帶入 model → **`RideRepository.Create` 的 raw INSERT**。
+      最後一項最容易漏：`Create` 走 raw SQL，**不是 GORM 自動映射**——service 設了
+      `RequiredVehicleType`，SQL 沒帶就靜靜地存成 `''`，回傳的 struct 卻是對的（只有 DB 是空的）。
+      且它有「帶／不帶 dropoff」**兩條 INSERT 分支，兩條都要補**。
+
+      **驗收**：`go build`／`vet`／`gofmt` 綠；`internal/service` 整合測試（真 PostGIS + Redis）——
+      指定車種持久化（**重讀 DB**，不只看回傳值）、**無目的地的單也要帶車種**（釘住第二條 INSERT 分支）、
+      未指定維持現行行為（`''`，不破壞既有 App／LINE 建單）、非白名單被拒回 `ErrInvalidVehicleType`。
+      **反向驗證**：只讓「無目的地」分支漏帶值 → 該案 FAIL（`得到 ""`）、有目的地案照樣 PASS
+      ——證明兩條分支各需一個測試。
+      **未驗**：docker compose 全服務 live E2E。
+
+- [x] **P3. 派單依車種過濾**（`dispatch.go` 候選司機迴圈）✅ **已實作（2026-07-17）**
+      `ride.RequiredVehicleType != "" && driver.VehicleType != ride.RequiredVehicleType` → skip，
+      排在 O3 的 `HasVehicle()` gate 之後（無車輛資料者本來就不得被派單，兩者疊加）。
+      未指定（`''`）時完全不過濾，既有訂單行為不變。
+
+- [x] **P4. 「找不到指定車種」的行為** ✅ **已實作（2026-07-17）**（定案 2026-07-16：不降級＋取消原因明確化）
+      **不降級**由 P3 的過濾直接達成（找不到就沒有候選 → 走現行 `giveUpIfUnaccepted` 自動取消）。
+      **取消原因明確化**：新增 `giveUpCancelInfo(ride)` 同時決定「機器可讀原因／給乘客的文案／WS payload」，
+      三者由同一處產生，不會各自漂移。
+      - 未指定車種：`cancel_reason=no_driver_available` ＋ 原文案「抱歉，附近暫無可用司機，請稍後再試」。
+      - 指定車種：`cancel_reason=no_vehicle_of_type` ＋ `required_vehicle_type` ＋
+        文案「抱歉，附近暫無**寵物用車**，請稍後再試」。
+      常數在 `internal/constants/cancel_reason.go`。
+      **顯示名的例外**：一般原則是「後端只認 code、顯示名由前端對應」（O1），但 LINE 推播文案是**後端組的**，
+      沒有前端可以對應 → 加 `constants.VehicleTypeDisplayName`，**僅供後端自產文案使用**；
+      API／WS payload 一律只送 code。未知 code 回「可用車輛」，讓文案在資料異常時仍讀得通。
+      **範圍限制（App 端請注意）**：目前**只有逾時取消這條路徑**帶 `cancel_reason`；
+      乘客主動取消／司機放棄等路徑不帶，App 端須容忍此欄位缺席。
+
+      **驗收**：`go build`／`vet`／`gofmt` 綠。
+      單元 `TestGiveUpCancelInfo`（未指定→泛用文案且**不帶** `required_vehicle_type` 鍵，
+      否則 App 會誤以為乘客指定過／指定→原因、文案、payload 三者皆具體）；
+      整合（真 PostGIS + Redis）`TestDispatch_指定車種只派同車種`、
+      `TestDispatch_未指定車種時所有車種都可派`（釘住「不可讓既有不指定的單變窄」）、
+      `TestDispatch_找不到指定車種時取消並帶原因`（端到端：一台都不派 → 逾時自動取消 →
+      `ride.cancelled` 帶 `no_vehicle_of_type`＋車種、訂單狀態為已取消；
+      測試把 `offerTimeout` 設 1 秒讓 `giveUpIfUnaccepted` 在測試時間內觸發）。
+      **反向驗證**：停用 P3 過濾 → 兩台都收到派單、「不降級」斷言 FAIL；
+      停用 P4 車種分支 → `cancel_reason` 退回 `no_driver_available`，單元與整合皆 FAIL。
+      **未驗**：docker compose 全服務 live E2E。
+
+      原始定案內容如下（保留供對照）：
       1. **不降級**：找不到指定車種時**不改派一般車**，走現行 `giveUpIfUnaccepted` 自動取消。
          寵物車／無障礙車是硬需求，默默派來一般車＝服務失敗還照收錢。
       2. **取消原因明確化**：`giveUpIfUnaccepted` 目前推播固定文案「抱歉，附近暫無可用司機，請稍後再試」；
@@ -592,8 +645,10 @@
   清潔費依乘客指定車種、上限 30%、**不計入抽成**／不降級＋取消原因明確化／customer fees 端點／
   **電話明碼、僅該趟乘客可見**）——**N、O、P 規格完備，可開始實作**，
   建議順序：O1→O2→O3（車輛地基）→ P1→P2→P3＋P4（車種）→ O6＋P5（清潔費）→ O4／O7（乘客可見）→ N（多停靠點，最大塊）。
-  **進度：O1 ✅（2026-07-16）、O2 ✅（2026-07-17，含車牌寬鬆驗證拍板）、O3 ✅（2026-07-17，派單過濾＋接單 409）
-  → 車輛地基完成，下一項是 P1（`rides` 加 `required_vehicle_type`）。**
+  **進度：O1 ✅（2026-07-16）、O2 ✅、O3 ✅、P1 ✅、P2 ✅、P3 ✅、P4 ✅（皆 2026-07-17）
+  → **乘客指定車種整條鏈路已通**：建單帶車種 → 只派同車種 → 找不到就明確取消並帶機器可讀原因。
+  下一項建議 **O6＋P5（清潔費）**——P 章節只剩 P5（`GET /api/customer/fees`），
+  而 O6 的觸發條件（依 `rides.required_vehicle_type` 是否為 `pet`）現在已經存在了。**
 
 計費地基 **F1–F8＋F3 里程退路＋F9-1~F9-6＋M 整數台幣 已全數合併進 main**，三端對帳與 F3/F9-3/F9-4 皆 docker E2E 驗過。
 其餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：

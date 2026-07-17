@@ -84,13 +84,14 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 		return r.db.Raw(`
 			INSERT INTO rides (
 				customer_id, status, pickup_point, pickup_address,
-				dropoff_point, dropoff_address,
+				dropoff_point, dropoff_address, required_vehicle_type,
 				requested_at, created_at, updated_at
 			) VALUES (
 				?, ?,
 				ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
 				?,
 				ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+				?,
 				?,
 				?, ?, ?
 			)
@@ -104,6 +105,7 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 			ride.DropoffPoint.Lng,
 			ride.DropoffPoint.Lat,
 			ride.DropoffAddress,
+			ride.RequiredVehicleType,
 			ride.RequestedAt,
 			ride.CreatedAt,
 			ride.UpdatedAt,
@@ -112,11 +114,12 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 	return r.db.Raw(`
 		INSERT INTO rides (
 			customer_id, status, pickup_point, pickup_address,
-			dropoff_address,
+			dropoff_address, required_vehicle_type,
 			requested_at, created_at, updated_at
 		) VALUES (
 			?, ?,
 			ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+			?,
 			?,
 			?,
 			?, ?, ?
@@ -129,6 +132,7 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 		ride.PickupPoint.Lat,
 		ride.PickupAddress,
 		ride.DropoffAddress,
+		ride.RequiredVehicleType,
 		ride.RequestedAt,
 		ride.CreatedAt,
 		ride.UpdatedAt,
