@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/model"
@@ -54,6 +56,32 @@ func (s *DriverRegistry) Login(ctx context.Context, lineUserID, password string)
 // Me 取司機個資與目前狀態（App 首頁顯示，取代信任本地狀態）
 func (s *DriverRegistry) Me(driverID int64) (*model.Driver, error) {
 	return s.drivers.FindByID(driverID)
+}
+
+// SetVehicle 設定司機車輛資訊（O2）：車種須為白名單 code，車牌正規化後做寬鬆格式檢查。
+// 兩者皆必填——留空等同「未設定」，會讓司機繞過 O3 的接單 gate。
+// 車牌與其他司機重複時回 repository.ErrPlateTaken。
+func (s *DriverRegistry) SetVehicle(driverID int64, vehicleType, plateNumber string) (*model.Driver, error) {
+	if !constants.IsValidVehicleType(vehicleType) {
+		return nil, ErrInvalidVehicleType
+	}
+	plate := constants.NormalizePlateNumber(plateNumber)
+	if !constants.IsValidPlateNumber(plate) {
+		return nil, ErrInvalidPlateNumber
+	}
+	d, err := s.drivers.FindByID(driverID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if err := s.drivers.UpdateVehicle(driverID, vehicleType, plate); err != nil {
+		return nil, err
+	}
+	d.VehicleType = vehicleType
+	d.PlateNumber = plate
+	return d, nil
 }
 
 // GoOnline 顯式上線：設為待命（Idle），重新進入派單池。

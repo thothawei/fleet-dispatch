@@ -68,6 +68,57 @@ func (h *DriverHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, driverPublic(d))
 }
 
+// driverVehicle 車輛資訊的回應形狀（O2）。附 `has_vehicle` 讓 App 不必自行判斷
+// 「兩欄皆非空」就知道能不能接單（與 O3 gate 同一條件）。
+func driverVehicle(d *model.Driver) gin.H {
+	return gin.H{
+		"vehicle_type": d.VehicleType,
+		"plate_number": d.PlateNumber,
+		"has_vehicle":  d.HasVehicle(),
+	}
+}
+
+// Vehicle GET /api/driver/vehicle — 司機自己的車輛資訊（O2）。
+// 未設定時兩欄為空字串、has_vehicle=false，非錯誤。
+func (h *DriverHandler) Vehicle(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
+	d, err := h.drivers.Me(driverID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "找不到司機"})
+		return
+	}
+	c.JSON(http.StatusOK, driverVehicle(d))
+}
+
+// UpdateVehicle PUT /api/driver/vehicle — 設定車種與車牌（O2）。
+// driver_id 一律取自 token，司機只能改自己的；車牌已被別人用走回 409。
+func (h *DriverHandler) UpdateVehicle(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
+	var req struct {
+		VehicleType string `json:"vehicle_type" binding:"required"`
+		PlateNumber string `json:"plate_number" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	d, err := h.drivers.SetVehicle(driverID, req.VehicleType, req.PlateNumber)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidVehicleType), errors.Is(err, service.ErrInvalidPlateNumber):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, repository.ErrPlateTaken):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "找不到司機"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, driverVehicle(d))
+}
+
 // Earnings GET /api/driver/earnings?month=2026-07 — 司機當月收入（F7）
 // 回傳趟數、營業額、手續費、司機實得、月會費、應付總公司（皆為「分」）。
 func (h *DriverHandler) Earnings(c *gin.Context) {

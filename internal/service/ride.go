@@ -97,12 +97,14 @@ func (s *RideService) rateLimitPerMin() int {
 	return rate
 }
 
-// CustomerCreateRequest 乘客 App 下單輸入（含選填目的地）。
+// CustomerCreateRequest 乘客 App 下單輸入（含選填目的地與選填指定車種）。
 type CustomerCreateRequest struct {
 	PickupLat, PickupLng   float64
 	PickupAddress          string
 	DropoffAddress         string
 	DropoffLat, DropoffLng *float64
+	// RequiredVehicleType 選填（P2）：'' ＝不指定，維持現行行為（任何車種都可派）。
+	RequiredVehicleType string
 }
 
 // CreateByCustomer 供已登入乘客（App）直接叫車：身分取自 JWT 的 customer_id。
@@ -117,6 +119,11 @@ func (s *RideService) CreateByCustomer(
 	}
 	if err := validateOptionalDropoffCoords(req.DropoffLat, req.DropoffLng); err != nil {
 		return nil, err
+	}
+	// 指定車種為選填；有給就必須是白名單 code（DB CHECK 是最後防線，但錯誤要在這裡
+	// 變成 400 而不是讓 INSERT 撞 CHECK 回 500）。
+	if req.RequiredVehicleType != "" && !constants.IsValidVehicleType(req.RequiredVehicleType) {
+		return nil, ErrInvalidVehicleType
 	}
 
 	customer, err := s.customers.FindByID(customerID)
@@ -142,14 +149,15 @@ func (s *RideService) CreateByCustomer(
 
 	now := time.Now()
 	ride := &model.Ride{
-		CustomerID:     customer.ID,
-		Status:         constants.RideStatusRequested,
-		PickupPoint:    model.GeoPoint{Lat: req.PickupLat, Lng: req.PickupLng},
-		PickupAddress:  req.PickupAddress,
-		DropoffAddress: req.DropoffAddress,
-		RequestedAt:    now,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		CustomerID:          customer.ID,
+		Status:              constants.RideStatusRequested,
+		PickupPoint:         model.GeoPoint{Lat: req.PickupLat, Lng: req.PickupLng},
+		PickupAddress:       req.PickupAddress,
+		DropoffAddress:      req.DropoffAddress,
+		RequiredVehicleType: req.RequiredVehicleType,
+		RequestedAt:         now,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	if req.DropoffLat != nil && req.DropoffLng != nil {
 		ride.DropoffPoint = &model.GeoPoint{Lat: *req.DropoffLat, Lng: *req.DropoffLng}

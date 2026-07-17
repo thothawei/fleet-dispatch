@@ -220,6 +220,8 @@ func main() {
 		authed.Use(middleware.DriverAuth(cfg.JWTSecret))
 		{
 			authed.GET("/driver/me", driverHandler.Me)
+			authed.GET("/driver/vehicle", driverHandler.Vehicle)
+			authed.PUT("/driver/vehicle", driverHandler.UpdateVehicle)
 			authed.GET("/driver/earnings", driverHandler.Earnings)
 			authed.POST("/driver/online", driverHandler.Online)
 			authed.POST("/driver/offline", driverHandler.Offline)

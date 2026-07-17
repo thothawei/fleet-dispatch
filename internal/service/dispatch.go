@@ -109,7 +109,7 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		return err
 	}
 
-	// 篩掉「已派過的」「已拒接的」「非待命的」，避免重複派給同一台車
+	// 篩掉「已派過的」「已拒接的」「非待命的」「未填車輛資訊的」，避免重複派給同一台車
 	rejected := s.redis.RejectedDrivers(ctx, rideID)
 	var targets []*model.Driver
 	for _, id := range candidates {
@@ -118,6 +118,15 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		}
 		driver, err := s.drivers.FindByID(id)
 		if err != nil || driver.Status != constants.DriverStatusIdle {
+			continue
+		}
+		// O3 gate：未填車種／車牌者不派單。既有司機一律如此，直到填完（拍板：無寬限期）。
+		if !driver.HasVehicle() {
+			continue
+		}
+		// P3：乘客指定車種時只派同車種的司機。**不降級**（P4 拍板）——寵物車／無障礙車是硬需求，
+		// 默默改派一般車＝服務失敗還照收錢；找不到就讓它走 giveUpIfUnaccepted 明確取消。
+		if ride.RequiredVehicleType != "" && driver.VehicleType != ride.RequiredVehicleType {
 			continue
 		}
 		targets = append(targets, driver)
@@ -232,13 +241,36 @@ func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
 		events.TypeRideCancelled, events.ActorSystem, nil, "dispatch_timeout")
 	s.redis.ClearRejected(ctx, rideID)
 	log.Warn().Int64("ride_id", rideID).Msg("逾時無人接單，訂單自動取消")
+
+	reason, text, payload := giveUpCancelInfo(ride)
 	if customerLineID, err := s.rides.GetCustomerLineUserID(rideID); err == nil && customerLineID != "" {
-		_ = s.line.PushText(ctx, customerLineID, "抱歉，附近暫無可用司機，請稍後再試")
+		_ = s.line.PushText(ctx, customerLineID, text)
 	}
+	log.Warn().Int64("ride_id", rideID).Str("cancel_reason", reason).Msg("逾時取消原因")
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
-		Type:   events.TypeRideCancelled,
-		RideID: rideID,
+		Type:    events.TypeRideCancelled,
+		RideID:  rideID,
+		Payload: payload,
 	})
+}
+
+// giveUpCancelInfo 組出逾時取消的原因、給乘客的文案與 WS payload（P4）。
+// 指定了車種卻沒人接，多半是「附近沒有這種車」而非「沒有司機」——泛用文案會誤導乘客
+// 一直重試，而正確的引導是「改用不指定車種」。payload 帶機器可讀欄位，
+// App 端不必去 parse 文案字串。
+func giveUpCancelInfo(ride *model.Ride) (reason, text string, payload map[string]any) {
+	if ride.RequiredVehicleType == "" {
+		return constants.CancelReasonNoDriver,
+			"抱歉，附近暫無可用司機，請稍後再試",
+			map[string]any{"cancel_reason": constants.CancelReasonNoDriver}
+	}
+	name := constants.VehicleTypeDisplayName(ride.RequiredVehicleType)
+	return constants.CancelReasonNoVehicleOfType,
+		fmt.Sprintf("抱歉，附近暫無%s，請稍後再試", name),
+		map[string]any{
+			"cancel_reason":         constants.CancelReasonNoVehicleOfType,
+			"required_vehicle_type": ride.RequiredVehicleType,
+		}
 }
 
 // CancelByCustomer 客戶主動取消進行中的訂單（尚未上車前）——LINE 入口，以 line_user_id 找目前進行中的訂單
@@ -379,6 +411,13 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 	if err != nil {
 		s.redis.ReleaseRideLock(ctx, rideID)
 		return "", err
+	}
+	// O3 gate：未填車輛資訊者不得接單。派單已先過濾（dispatchRound），這裡擋的是
+	// 直接打 API／LINE 的路徑——只靠 App 端跳轉擋不住。
+	// 排在狀態檢查之前：這是接單資格問題，回「非待命狀態」會讓司機不知道要去填車輛。
+	if !driver.HasVehicle() {
+		s.redis.ReleaseRideLock(ctx, rideID)
+		return "", ErrDriverNoVehicle
 	}
 	if driver.Status != constants.DriverStatusIdle {
 		s.redis.ReleaseRideLock(ctx, rideID)

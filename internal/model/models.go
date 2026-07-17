@@ -153,6 +153,9 @@ type Ride struct {
 	CompletedAt    *time.Time `gorm:"" json:"completed_at"`
 	DistanceM      *int       `gorm:"column:distance_m" json:"distance_m"`
 	EtaPickupSec   *int       `gorm:"column:eta_pickup_sec" json:"eta_pickup_sec"`
+	// RequiredVehicleType 乘客指定的車種（P1）：constants.VehicleType* 之一；'' ＝不指定（任何車種都可派）。
+	// 這是清潔費（O6）加收與否的判斷依據——依**乘客要的車種**，不是司機開的車種。
+	RequiredVehicleType string `gorm:"column:required_vehicle_type;not null;default:''" json:"required_vehicle_type"`
 	// 計費欄位：完成時定格寫入（費率快照制），一律以「分」儲存；未完成/取消為 nil。
 	FareAmountCents       *int64    `gorm:"column:fare_amount_cents" json:"fare_amount_cents"`
 	CommissionAmountCents *int64    `gorm:"column:commission_amount_cents" json:"commission_amount_cents"`

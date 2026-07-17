@@ -77,6 +77,13 @@ func TestDriverVehicleMigrationReversible(t *testing.T) {
 		t.Fatal("up 後應有車牌 partial unique index")
 	}
 
+	// 先回到「O1 剛套用完」的版本，把 O1 之後的 migration 卸掉。
+	// 不能直接 Steps(-1)——那卸的是最新的那個 migration，一旦有人在 O1 之後新增
+	// migration（P1 就是），這個測試會安靜地改去驗別人的 down，O1 反而失去覆蓋。
+	if err := m.Migrate(17); err != nil && err != migrate.ErrNoChange {
+		t.Fatalf("回到 version 17 失敗: %v", err)
+	}
+
 	// down 一步：O1 的產物要全部消失（含 CHECK 與 index，不能只 drop 欄位）
 	if err := m.Steps(-1); err != nil {
 		t.Fatalf("down 失敗: %v", err)

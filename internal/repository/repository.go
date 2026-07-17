@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
 	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/model"
 )
+
+// pgUniqueViolation Postgres 唯一鍵衝突的 SQLSTATE。
+const pgUniqueViolation = "23505"
 
 type CustomerRepository struct {
 	db *gorm.DB
@@ -80,13 +84,14 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 		return r.db.Raw(`
 			INSERT INTO rides (
 				customer_id, status, pickup_point, pickup_address,
-				dropoff_point, dropoff_address,
+				dropoff_point, dropoff_address, required_vehicle_type,
 				requested_at, created_at, updated_at
 			) VALUES (
 				?, ?,
 				ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
 				?,
 				ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+				?,
 				?,
 				?, ?, ?
 			)
@@ -100,6 +105,7 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 			ride.DropoffPoint.Lng,
 			ride.DropoffPoint.Lat,
 			ride.DropoffAddress,
+			ride.RequiredVehicleType,
 			ride.RequestedAt,
 			ride.CreatedAt,
 			ride.UpdatedAt,
@@ -108,11 +114,12 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 	return r.db.Raw(`
 		INSERT INTO rides (
 			customer_id, status, pickup_point, pickup_address,
-			dropoff_address,
+			dropoff_address, required_vehicle_type,
 			requested_at, created_at, updated_at
 		) VALUES (
 			?, ?,
 			ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+			?,
 			?,
 			?,
 			?, ?, ?
@@ -125,6 +132,7 @@ func (r *RideRepository) Create(ride *model.Ride) error {
 		ride.PickupPoint.Lat,
 		ride.PickupAddress,
 		ride.DropoffAddress,
+		ride.RequiredVehicleType,
 		ride.RequestedAt,
 		ride.CreatedAt,
 		ride.UpdatedAt,
@@ -199,6 +207,34 @@ func (r *DriverRepository) UpdateStatus(id int64, status int16) error {
 		"status":     status,
 		"updated_at": time.Now(),
 	}).Error
+}
+
+// ErrPlateTaken 車牌已掛在別的司機帳號上（uq_drivers_plate_number，O1）。
+var ErrPlateTaken = errors.New("此車牌已被其他司機使用")
+
+// UpdateVehicle 更新司機車輛資訊（O2）。呼叫端負責驗證車種白名單與車牌格式；
+// 值域仍由 DB CHECK 與 partial unique index 兜底。
+// 撞到車牌唯一索引時翻成 ErrPlateTaken，讓 handler 能回 409 而非 500。
+func (r *DriverRepository) UpdateVehicle(id int64, vehicleType, plateNumber string) error {
+	err := r.db.Model(&model.Driver{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"vehicle_type": vehicleType,
+		"plate_number": plateNumber,
+		"updated_at":   time.Now(),
+	}).Error
+	if isPlateConflict(err) {
+		return ErrPlateTaken
+	}
+	return err
+}
+
+// isPlateConflict 判斷是否為車牌唯一索引衝突。以 PgError 的 code + 約束名判斷，
+// 不比對錯誤訊息字串（訊息會隨 Postgres 版本／語系變動）。
+func isPlateConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == "uq_drivers_plate_number"
 }
 
 func (r *DriverRepository) SetPassword(id int64, passwordHash string) error {

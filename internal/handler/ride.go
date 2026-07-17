@@ -151,6 +151,8 @@ func (h *RideHandler) Create(c *gin.Context) {
 		DropoffAddress string   `json:"dropoff_address"`
 		DropoffLat     *float64 `json:"dropoff_lat"`
 		DropoffLng     *float64 `json:"dropoff_lng"`
+		// 選填（P2）：未帶＝不指定車種，維持現行行為，既有 App／LINE 建單不受影響。
+		RequiredVehicleType string `json:"required_vehicle_type"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
@@ -158,12 +160,13 @@ func (h *RideHandler) Create(c *gin.Context) {
 	}
 	ride, err := h.rideService.CreateByCustomer(
 		c.Request.Context(), customerID, service.CustomerCreateRequest{
-			PickupLat:      req.PickupLat,
-			PickupLng:      req.PickupLng,
-			PickupAddress:  req.PickupAddress,
-			DropoffAddress: req.DropoffAddress,
-			DropoffLat:     req.DropoffLat,
-			DropoffLng:     req.DropoffLng,
+			PickupLat:           req.PickupLat,
+			PickupLng:           req.PickupLng,
+			PickupAddress:       req.PickupAddress,
+			DropoffAddress:      req.DropoffAddress,
+			DropoffLat:          req.DropoffLat,
+			DropoffLng:          req.DropoffLng,
+			RequiredVehicleType: req.RequiredVehicleType,
 		},
 	)
 	if err != nil {
@@ -176,7 +179,7 @@ func (h *RideHandler) Create(c *gin.Context) {
 // createStatusForErr 將下單錯誤對應到 HTTP 狀態碼。
 func createStatusForErr(err error) int {
 	switch {
-	case errors.Is(err, service.ErrInvalidCoords):
+	case errors.Is(err, service.ErrInvalidCoords), errors.Is(err, service.ErrInvalidVehicleType):
 		return http.StatusBadRequest
 	case errors.Is(err, service.ErrActiveRideExists):
 		return http.StatusConflict
