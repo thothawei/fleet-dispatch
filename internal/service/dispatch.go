@@ -109,7 +109,7 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		return err
 	}
 
-	// 篩掉「已派過的」「已拒接的」「非待命的」，避免重複派給同一台車
+	// 篩掉「已派過的」「已拒接的」「非待命的」「未填車輛資訊的」，避免重複派給同一台車
 	rejected := s.redis.RejectedDrivers(ctx, rideID)
 	var targets []*model.Driver
 	for _, id := range candidates {
@@ -118,6 +118,10 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		}
 		driver, err := s.drivers.FindByID(id)
 		if err != nil || driver.Status != constants.DriverStatusIdle {
+			continue
+		}
+		// O3 gate：未填車種／車牌者不派單。既有司機一律如此，直到填完（拍板：無寬限期）。
+		if !driver.HasVehicle() {
 			continue
 		}
 		targets = append(targets, driver)
@@ -379,6 +383,13 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 	if err != nil {
 		s.redis.ReleaseRideLock(ctx, rideID)
 		return "", err
+	}
+	// O3 gate：未填車輛資訊者不得接單。派單已先過濾（dispatchRound），這裡擋的是
+	// 直接打 API／LINE 的路徑——只靠 App 端跳轉擋不住。
+	// 排在狀態檢查之前：這是接單資格問題，回「非待命狀態」會讓司機不知道要去填車輛。
+	if !driver.HasVehicle() {
+		s.redis.ReleaseRideLock(ctx, rideID)
+		return "", ErrDriverNoVehicle
 	}
 	if driver.Status != constants.DriverStatusIdle {
 		s.redis.ReleaseRideLock(ctx, rideID)

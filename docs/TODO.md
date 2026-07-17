@@ -405,13 +405,30 @@
       拿掉 `NormalizePlateNumber` → 正規化與車牌衝突兩案 FAIL。
       **未驗**：docker compose 起全服務的 live E2E（單元＋整合已覆蓋，留待 O3 一起跑）。
 
-- [ ] **O3. 接單前置檢查（gate）** ✅ **已定案（2026-07-16）：強制填寫，無寬限期**
-      **後端強制**：無車輛資訊的司機不得被派單（`dispatch.go` 候選司機過濾）
-      且 `POST /api/rides/:id/accept` 回 409／400。
-      **不能只靠 App 端擋**——API 可被直接呼叫。
-      **既有司機**：上線時全部沒有車輛資料 → **一律無法接單，直到填完**（使用者拍板：不設寬限期）。
-      App 端以**強制跳轉**引導填寫（見 App TODO）；後端不需要回填 migration，
-      但**上線前要通知司機**（營運事項，非工程項）。
+- [x] **O3. 接單前置檢查（gate）** ✅ **已實作（2026-07-17）**（定案 2026-07-16：強制填寫，無寬限期）
+      **兩道都在後端**（`model.Driver.HasVehicle()` 為單一判準，與 O2 回應的 `has_vehicle` 同源）：
+      1. **派單過濾**：`dispatch.go` 的 `dispatchRound` 候選迴圈跳過未填車輛者
+         （與既有「已派過／已拒接／非待命」同一層）。
+      2. **接單擋下**：`AcceptRide` 回 `ErrDriverNoVehicle`。
+         **API 自動得到 409**——`statusForErr` 對非 `ErrForbidden` 的錯誤一律回 409，不必改 handler；
+         **LINE 路徑自動得到文字回覆**——webhook 既有的 `err.Error()` 回覆會把
+         「請先填寫車種與車牌才能接單」原樣送給司機。
+      **不能只靠 App 端擋**——API 可被直接呼叫，故 gate 長在 service 層而非 handler。
+      **順序**：gate 排在既有的「非待命狀態」檢查**之前**——沒填車輛卻被告知「非待命狀態」，
+      司機不會知道要去填車輛。
+      **既有司機**：O1 migration 後兩欄皆為 `''` → 一律無法接單，直到填完（無寬限期）。
+      後端不需要回填 migration，但**上線前要通知司機**（營運事項，非工程項）。
+
+      **驗收**：`go build`／`vet`／`gofmt` 綠；`internal/service` 整合測試（真 PostGIS + Redis）——
+      `TestDispatch_未填車輛的司機不被派單`（兩台同樣待命且都在附近，只有填了車輛的收到 `ride.assigned`）、
+      `TestAcceptRide_未填車輛回ErrDriverNoVehicle`（回 `ErrDriverNoVehicle`、訂單狀態與司機狀態皆無副作用、
+      **且有車司機隨後仍能接走這張單**——釘住 gate 早退時有正確釋放搶單鎖）。
+      **反向驗證**：停用派單過濾 → 兩台都收到派單，測試 FAIL；停用接單 gate → `AcceptRide` 回 nil，測試 FAIL。
+      **回歸**：`internal/service` 全套通過（781s，無 FAIL）。
+      **順帶盤到的事實**：本次之前**沒有任何測試走過 `service.AcceptRide`／`Dispatch`**
+      （既有測試一律用 `repository.AcceptRide` 直接改狀態），所以回歸全綠**不代表** gate 被既有測試考驗過——
+      這兩條路徑的覆蓋完全來自本次新增的測試。日後改動搶單／派單邏輯時別誤以為有既有安全網。
+      **未驗**：docker compose 全服務 live E2E。
 
 - [ ] **O4. 乘客端可見車輛資訊**
       `ride.accepted` payload 與 `GET /api/customer/rides/active` 加
@@ -575,7 +592,8 @@
   清潔費依乘客指定車種、上限 30%、**不計入抽成**／不降級＋取消原因明確化／customer fees 端點／
   **電話明碼、僅該趟乘客可見**）——**N、O、P 規格完備，可開始實作**，
   建議順序：O1→O2→O3（車輛地基）→ P1→P2→P3＋P4（車種）→ O6＋P5（清潔費）→ O4／O7（乘客可見）→ N（多停靠點，最大塊）。
-  **進度：O1 ✅（2026-07-16）、O2 ✅（2026-07-17，含車牌寬鬆驗證拍板）→ 下一項是 O3（接單 gate）。**
+  **進度：O1 ✅（2026-07-16）、O2 ✅（2026-07-17，含車牌寬鬆驗證拍板）、O3 ✅（2026-07-17，派單過濾＋接單 409）
+  → 車輛地基完成，下一項是 P1（`rides` 加 `required_vehicle_type`）。**
 
 計費地基 **F1–F8＋F3 里程退路＋F9-1~F9-6＋M 整數台幣 已全數合併進 main**，三端對帳與 F3/F9-3/F9-4 皆 docker E2E 驗過。
 其餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：

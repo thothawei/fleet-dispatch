@@ -16,4 +16,7 @@ var (
 	ErrLastSuperadmin     = errors.New("不可移除最後一個 superadmin")
 	ErrInvalidVehicleType = errors.New("車種無效")
 	ErrInvalidPlateNumber = errors.New("車牌格式錯誤")
+	// ErrDriverNoVehicle O3 gate：未填車輛資訊者不得接單。訊息會原樣回給司機
+	// （API 走 statusForErr → 409；LINE 走 webhook 的 err.Error() 文字回覆）。
+	ErrDriverNoVehicle = errors.New("請先填寫車種與車牌才能接單")
 )
