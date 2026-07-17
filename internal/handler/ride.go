@@ -153,10 +153,32 @@ func (h *RideHandler) Create(c *gin.Context) {
 		DropoffLng     *float64 `json:"dropoff_lng"`
 		// 選填（P2）：未帶＝不指定車種，維持現行行為，既有 App／LINE 建單不受影響。
 		RequiredVehicleType string `json:"required_vehicle_type"`
+		// 選填（N3）：多乘客／多停靠點行程。未帶＝傳統單點訂單。
+		// 有帶時 pickup/dropoff 由 stops 推導（第一個 pickup／最終 dropoff），
+		// 此時上面的 pickup_lat/lng 等欄位會被忽略。
+		Stops []struct {
+			Seq            int     `json:"seq"`
+			Kind           string  `json:"kind"` // pickup / dropoff
+			Lat            float64 `json:"lat"`
+			Lng            float64 `json:"lng"`
+			Address        string  `json:"address"`
+			PassengerLabel string  `json:"passenger_label"`
+		} `json:"stops"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
 		return
+	}
+	stops := make([]service.StopInput, 0, len(req.Stops))
+	for _, s := range req.Stops {
+		stops = append(stops, service.StopInput{
+			Seq:            s.Seq,
+			Kind:           s.Kind,
+			Lat:            s.Lat,
+			Lng:            s.Lng,
+			Address:        s.Address,
+			PassengerLabel: s.PassengerLabel,
+		})
 	}
 	ride, err := h.rideService.CreateByCustomer(
 		c.Request.Context(), customerID, service.CustomerCreateRequest{
@@ -167,6 +189,7 @@ func (h *RideHandler) Create(c *gin.Context) {
 			DropoffLat:          req.DropoffLat,
 			DropoffLng:          req.DropoffLng,
 			RequiredVehicleType: req.RequiredVehicleType,
+			Stops:               stops,
 		},
 	)
 	if err != nil {
@@ -179,8 +202,16 @@ func (h *RideHandler) Create(c *gin.Context) {
 // createStatusForErr 將下單錯誤對應到 HTTP 狀態碼。
 func createStatusForErr(err error) int {
 	switch {
-	case errors.Is(err, service.ErrInvalidCoords), errors.Is(err, service.ErrInvalidVehicleType):
+	case errors.Is(err, service.ErrInvalidCoords), errors.Is(err, service.ErrInvalidVehicleType),
+		// 停靠點填錯是乘客的輸入問題（N2）→ 400，錯誤訊息本身已說明錯在哪。
+		errors.Is(err, service.ErrTooManyStops), errors.Is(err, service.ErrTooManyPassengers),
+		errors.Is(err, service.ErrInvalidStopKind), errors.Is(err, service.ErrDuplicateStopSeq),
+		errors.Is(err, service.ErrUnpairedStop), errors.Is(err, service.ErrDropoffBeforePickup),
+		errors.Is(err, service.ErrMissingPassenger):
 		return http.StatusBadRequest
+	case errors.Is(err, service.ErrStopsUnavailable):
+		// 這是伺服器沒接好，不是乘客填錯——不可回 400 讓乘客以為是自己的問題。
+		return http.StatusServiceUnavailable
 	case errors.Is(err, service.ErrActiveRideExists):
 		return http.StatusConflict
 	case errors.Is(err, service.ErrRateLimited):

@@ -210,6 +210,43 @@ func (MembershipInvoice) TableName() string {
 	return "membership_invoices"
 }
 
+// RideStop 多乘客／多停靠點行程的單一停靠點（N1）。
+// 一趟的停靠點依 Seq 由小到大依序造訪；**ride_stops 為空 ＝ 傳統單點訂單**（既有行為）。
+type RideStop struct {
+	ID     int64 `gorm:"primaryKey" json:"id"`
+	RideID int64 `gorm:"column:ride_id;not null" json:"ride_id"`
+	// Seq 停靠順序，1 起算；同一趟內唯一（uq_ride_stops_ride_seq）——
+	// 重複的話「下一站是誰」就沒有答案。
+	Seq  int    `gorm:"column:seq;not null" json:"seq"`
+	Kind string `gorm:"column:kind;not null" json:"kind"` // constants.StopKind*
+	// Point 停靠點座標。地址僅供顯示，導航與計費一律吃座標。
+	Point   GeoPoint `gorm:"column:point;type:geography(Point,4326);not null" json:"point"`
+	Address string   `gorm:"not null;default:''" json:"address"`
+	// PassengerLabel 給司機辨識用（A/B/C…）；不參與邏輯判斷，故無值域限制。
+	PassengerLabel string `gorm:"column:passenger_label;not null;default:''" json:"passenger_label"`
+	// ArrivedAt／SkippedAt 停靠點處理狀態（N7）：互斥，皆 nil ＝ 尚未處理。
+	// SkippedAt 非 nil ＝ 乘客沒出現、司機標記跳過 → **不計入 N5 的計費路線**
+	// （沒去就沒開那段路，計入等於收乘客沒走的路的錢）。
+	ArrivedAt *time.Time `gorm:"column:arrived_at" json:"arrived_at"`
+	SkippedAt *time.Time `gorm:"column:skipped_at" json:"skipped_at"`
+	CreatedAt time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt time.Time  `gorm:"not null" json:"updated_at"`
+}
+
+func (RideStop) TableName() string {
+	return "ride_stops"
+}
+
+// Pending 尚未處理（未到達也未跳過）。
+func (s RideStop) Pending() bool {
+	return s.ArrivedAt == nil && s.SkippedAt == nil
+}
+
+// Skipped 乘客沒出現、已被司機跳過；N5 計費路線不算這一段。
+func (s RideStop) Skipped() bool {
+	return s.SkippedAt != nil
+}
+
 // RideMessage 行程內對話訊息（乘客↔司機）。即時遞送走 WebSocket（chat.message），本表為歷史真源。
 type RideMessage struct {
 	ID         int64     `gorm:"primaryKey" json:"id"`
