@@ -73,6 +73,7 @@ func main() {
 	feeSettingsRepo := repository.NewFeeSettingsRepository(db)
 	membershipInvoiceRepo := repository.NewMembershipInvoiceRepository(db)
 	rideMessageRepo := repository.NewRideMessageRepository(db)
+	rideStopRepo := repository.NewRideStopRepository(db)
 	lostItemRepo := repository.NewLostItemRepository(db)
 
 	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
@@ -128,6 +129,7 @@ func main() {
 	dispatchService.SetRideEvents(rideEventRepo)
 	deviceTokenService := service.NewDeviceTokenService(deviceTokenRepo)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
+	rideService.SetStops(rideStopRepo) // N3：多乘客／多停靠點行程
 	rideService.SetRideEvents(rideEventRepo)
 	trackingService := service.NewTrackingService(
 		driverRepo, rideRepo, trackRepo, redisStore, lineClient, dispatchService,

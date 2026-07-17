@@ -261,24 +261,48 @@
 
 ### 施作項目（嚴格相依，由上而下）
 
-- [ ] **N1. `ride_stops` 資料表**（新 migration）
-      欄位建議：`ride_id`、`seq`（停靠順序，1..N）、`kind`（pickup／dropoff）、
-      `point`（geography Point）、`address`、`passenger_label`（A/B/C/D，或 `passenger_name`）、
-      `arrived_at`（司機到達時間，供軌跡稽核）。
-      索引 `(ride_id, seq)`；CHECK `seq >= 1`。
-      **相容性**：既有單點訂單維持只用 `rides.pickup_point`/`dropoff_point`，
-      `ride_stops` 為空＝舊行為（LINE 建的無目的地訂單也走這條）。
+- [x] **N1. `ride_stops` 資料表** ✅ **已實作（2026-07-17，migration `000021`）**
+      `ride_id`（FK ON DELETE CASCADE）、`seq`、`kind`、`point`、`address`、`passenger_label`、
+      `arrived_at`、`skipped_at`。CHECK：`seq >= 1`、`kind IN ('pickup','dropoff')`；
+      **UNIQUE `(ride_id, seq)`**——seq ＝「第幾站」，重複的話「下一站是誰」沒有答案。
+      （UNIQUE 已隱含建立 `(ride_id, seq)` 索引，不另建。）
 
-- [ ] **N2. 乘客數上限與驗證** ✅ **已定案（2026-07-16）：5 位乘客，各自上下車**
-      → **最多 5 位乘客、最多 10 個停靠點**（每位一上一下）。上限值放常數或 `fleet_settings`（實作時定）。
-      驗證：每位乘客必須成對出現 pickup＋dropoff；dropoff 的 `seq` 必須大於同一位乘客的 pickup；
-      最終目的地＝`seq` 最大的 dropoff。超過上限回 400。
+      **實作時定的三件事**：
+      1. **狀態用兩個時間欄（`arrived_at`／`skipped_at`）而非 status 字串**：兩者天然互斥、
+         且都需要「何時發生」——時間欄同時回答「是否發生」與「何時」，不必另外維護狀態機。
+         皆 NULL ＝ 尚未處理。`skipped_at` 對應 2026-07-17 拍板的「司機可跳過缺席乘客」。
+      2. **`passenger_label` 不做值域 CHECK**（不同於車種）：純粹給司機辨識，不參與邏輯判斷，
+         值髒掉不會算錯錢。
+      3. **相容性已用測試釘住**：既有單點訂單**不產生任何 ride_stops 列**。
 
-- [ ] **N3. 建單 API 擴充**（`POST /api/rides`）
+- [x] **N2. 乘客數上限與驗證** ✅ **已實作（2026-07-17）**（定案 2026-07-16：5 位乘客，各自上下車）
+      上限放 `internal/constants/ride_stop.go`（`MaxRidePassengers=5`／`MaxRideStops=10`），
+      **不放 `fleet_settings`**：它是產品規則不是營運費率，沒有「後台隨時要調」的需求，
+      放常數才能被編譯期引用（測試也直接讀它）。
+      驗證在 `validateStops`（純函式，`internal/service/ride_stops_validate.go`），全部回 400：
+      停靠點數 ≤10、乘客數 ≤5、kind 白名單、座標合法、**seq 不得重複**、
+      每位乘客**成對** pickup＋dropoff、**dropoff.seq > pickup.seq**（不能先送再接）。
+      錯誤刻意分成多個（而非一個籠統的 ErrInvalidStops）——乘客填錯時要知道錯在哪。
+      **驗收**：14 個單元案（合法：空 stops／兩人四停交錯／5 人 10 停上限／客戶端未依序送；
+      非法：超上限／未成對／先下後上／重複上車點／seq 重複／seq=0／kind 非白名單／無標籤／座標非法）。
+
+- [x] **N3. 建單 API 擴充**（`POST /api/rides`）✅ **已實作（2026-07-17）**
       body 加選填 `stops: [{seq, kind, lat, lng, address, passenger_label}]`。
-      無 `stops` 時完全維持現行行為（不可破壞既有 App／LINE 建單）。
-      `rides.pickup_point` 仍寫第一個 pickup、`dropoff_point` 寫最終 dropoff，
-      讓派單／地圖／報表等既有讀取路徑不必全面改寫。
+      無 `stops` ＝完全維持現行行為（**測試釘住：單點建單不產生 ride_stops 列**）。
+      有 `stops` 時 **pickup／dropoff 由 stops 推導**（第一個 pickup／seq 最大的 dropoff）並覆蓋
+      body 的 `pickup_lat/lng` 等欄位 → `rides.pickup_point`／`dropoff_point` 照樣有值，
+      派單、導航、地圖、F3 退路、報表**一行都不用改**。
+      **落庫順序**：停靠點寫在 `rides.Create` 之後、**派單之前**（派單一發出司機就該看得到全程），
+      寫失敗則整筆建單失敗——「只有第一個上車點、少載其餘乘客」的行程比沒建成更糟。
+      **未注入 stops repo 卻收到 stops → `ErrStopsUnavailable` → 503**（不是 400：
+      這是伺服器沒接好，不該讓乘客以為自己填錯）。
+
+      **驗收**：`go build`／`vet`／`gofmt` 綠；整合測試（真 PostGIS + Redis）——
+      多停靠點落庫（**含座標經緯度正確**、rides 推導正確、新停靠點為未處理狀態）、
+      客戶端未依序送仍依 seq 落庫、**單點訂單不建 stops**、驗證失敗不留孤兒訂單、未注入時明確失敗。
+      **反向驗證**：`ST_MakePoint` 經緯度對調 → 座標跑到 lat=58.48（愛沙尼亞），FAIL；
+      拿掉「由 stops 推導 pickup／dropoff」→ 建單以 `無效的上車座標` FAIL。
+      **未驗**：docker compose 全服務 live E2E。
 
 - [ ] **N4. 派單與 ETA**（`dispatch.go`）
       派單仍以「第一個上車點」找最近司機（現行邏輯不變）。

@@ -25,9 +25,16 @@ type RideRequest struct {
 type RideService struct {
 	customers *repository.CustomerRepository
 	rides     *repository.RideRepository
+	stops     *repository.RideStopRepository
 	redis     *redisstore.Store
 	dispatch  *DispatchService
 	audit     rideAuditor
+}
+
+// SetStops 注入停靠點 repo（供多乘客／多停靠點行程，N3）；可選——
+// 未注入時帶 stops 的建單會被拒（見 CreateByCustomer），單點建單不受影響。
+func (s *RideService) SetStops(stops *repository.RideStopRepository) {
+	s.stops = stops
 }
 
 func NewRideService(
@@ -105,6 +112,42 @@ type CustomerCreateRequest struct {
 	DropoffLat, DropoffLng *float64
 	// RequiredVehicleType 選填（P2）：'' ＝不指定，維持現行行為（任何車種都可派）。
 	RequiredVehicleType string
+	// Stops 選填（N3）：多乘客／多停靠點行程。空 ＝ 傳統單點訂單，完全維持現行行為。
+	// 有給時，pickup/dropoff 座標改由 stops 推導（第一個 pickup／最終 dropoff），
+	// 呼叫端傳的 PickupLat/Lng 等欄位會被覆蓋。
+	Stops []StopInput
+}
+
+// prepareStops 驗證停靠點並由它們推導 rides 的 pickup／dropoff（N3）。
+// 回傳排序後的停靠點；單點訂單回 nil，req 不動。
+//
+// **相容性的關鍵**：多停靠點行程仍照樣寫 rides.pickup_point（第一個上車點）與
+// dropoff_point（最終目的地）。派單找最近司機、司機導航、地圖、F3 路線里程退路、報表
+// ——全部照原樣讀 rides，一行都不用改。ride_stops 是額外資訊，不是替代品。
+func (s *RideService) prepareStops(req *CustomerCreateRequest) ([]StopInput, error) {
+	if len(req.Stops) == 0 {
+		return nil, nil // 單點訂單，維持現行行為
+	}
+	if s.stops == nil {
+		// 沒注入 repo 卻收到 stops：與其默默當成單點訂單建出「少載四個人」的行程，
+		// 不如明確失敗。
+		return nil, ErrStopsUnavailable
+	}
+	if err := validateStops(req.Stops); err != nil {
+		return nil, err
+	}
+	sorted := sortStopsBySeq(req.Stops)
+	first, ok := firstPickup(sorted)
+	if !ok {
+		return nil, ErrUnpairedStop
+	}
+	final, ok := finalDropoff(sorted)
+	if !ok {
+		return nil, ErrUnpairedStop
+	}
+	req.PickupLat, req.PickupLng, req.PickupAddress = first.Lat, first.Lng, first.Address
+	req.DropoffLat, req.DropoffLng, req.DropoffAddress = &final.Lat, &final.Lng, final.Address
+	return sorted, nil
 }
 
 // CreateByCustomer 供已登入乘客（App）直接叫車：身分取自 JWT 的 customer_id。
@@ -114,6 +157,11 @@ func (s *RideService) CreateByCustomer(
 	customerID int64,
 	req CustomerCreateRequest,
 ) (*model.Ride, error) {
+	// 多停靠點（N3）：先驗證再由 stops 推導 pickup／dropoff，讓後續流程與單點訂單完全一致。
+	sortedStops, err := s.prepareStops(&req)
+	if err != nil {
+		return nil, err
+	}
 	if err := validatePickupCoords(req.PickupLat, req.PickupLng); err != nil {
 		return nil, err
 	}
@@ -165,6 +213,13 @@ func (s *RideService) CreateByCustomer(
 	if err := s.rides.Create(ride); err != nil {
 		return nil, err
 	}
+	// 停靠點必須在派單**之前**落庫：派單一發出，司機端就該看得到全程（N4）。
+	// 寫失敗則整筆建單失敗——只有第一個上車點、少載其餘乘客的行程，比沒建成更糟。
+	if len(sortedStops) > 0 {
+		if err := s.stops.CreateForRide(ride.ID, toStopRows(sortedStops)); err != nil {
+			return nil, err
+		}
+	}
 	s.audit.record(ride.ID, nil, constants.RideStatusRequested,
 		events.TypeRideRequested, events.ActorCustomer, idPtr(customer.ID), "app")
 
@@ -174,6 +229,22 @@ func (s *RideService) CreateByCustomer(
 	}(ride.ID)
 
 	return ride, nil
+}
+
+// toStopRows 轉成 repository 的落庫形狀。
+func toStopRows(stops []StopInput) []repository.StopRow {
+	rows := make([]repository.StopRow, 0, len(stops))
+	for _, s := range stops {
+		rows = append(rows, repository.StopRow{
+			Seq:            s.Seq,
+			Kind:           s.Kind,
+			Lat:            s.Lat,
+			Lng:            s.Lng,
+			Address:        s.Address,
+			PassengerLabel: s.PassengerLabel,
+		})
+	}
+	return rows
 }
 
 // RideQueryService 訂單查詢
