@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -242,6 +243,32 @@ func rideAssignedPayload(ride *model.Ride, pickupAddress string, etaSec, distM i
 	return payload
 }
 
+// rideOfferPushData 組裝 FCM/APNs 推播的 data payload（App 被殺後點推播喚醒用）。
+//
+// 值**一律字串**（FCM data 限制）；App 端 fleetEventFromPushData 會把座標／eta／dist
+// 轉回數值。與 rideAssignedPayload 對齊同一組欄位，但**不含 stops**——結構化陣列不放
+// 進 data（見 pitfall-fcm-data-all-strings），App 接單後重讀 rides/active 補齊全程。
+// dropoff 三鍵未指定目的地時省略（App 端缺鍵＝沒有該資訊）。
+func rideOfferPushData(ride *model.Ride, pickupAddress string, etaSec, distM int) map[string]string {
+	data := map[string]string{
+		"type":       events.TypeRideAssigned,
+		"ride_id":    strconv.FormatInt(ride.ID, 10),
+		"address":    pickupAddress,
+		"pickup_lat": strconv.FormatFloat(ride.PickupPoint.Lat, 'f', -1, 64),
+		"pickup_lng": strconv.FormatFloat(ride.PickupPoint.Lng, 'f', -1, 64),
+		"eta_sec":    strconv.Itoa(etaSec),
+		"dist_m":     strconv.Itoa(distM),
+	}
+	if ride.DropoffAddress != "" {
+		data["dropoff_address"] = ride.DropoffAddress
+	}
+	if ride.DropoffPoint != nil {
+		data["dropoff_lat"] = strconv.FormatFloat(ride.DropoffPoint.Lat, 'f', -1, 64)
+		data["dropoff_lng"] = strconv.FormatFloat(ride.DropoffPoint.Lng, 'f', -1, 64)
+	}
+	return data
+}
+
 // rideAcceptedDriverPayload 組裝 ride.accepted 推給「司機端」的 payload；
 // 司機接單後直接拿到目的地與全程停靠點，不必等 pickup 回應。
 func rideAcceptedDriverPayload(ride *model.Ride, stops []model.RideStop) map[string]any {
@@ -268,12 +295,14 @@ func (s *DispatchService) pushOffer(ctx context.Context, driver *model.Driver, r
 	if err := s.line.PushRideOffer(ctx, driver.LineUserID, ride.ID, msg); err != nil {
 		log.Error().Err(err).Int64("driver_id", driver.ID).Msg("推播派單失敗")
 	}
-	// App 推播（FCM/APNs）：與 LINE 並存；無 token／stub 時靜默略過
+	// App 推播（FCM/APNs）：與 LINE 並存；無 token／stub 時靜默略過。
+	// data 讓 App 被殺後點推播能直接開接單卡（stops 不放，接單後重讀 active 補齊）。
 	if s.appNotify != nil {
 		s.appNotify.NotifyDriverRideOffer(
 			ctx, driver.ID, ride.ID,
 			fmt.Sprintf("新派單 #%d", ride.ID),
 			msg,
+			rideOfferPushData(ride, ride.PickupAddress, etaSec, distM),
 		)
 	}
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driver.ID}, events.Event{
