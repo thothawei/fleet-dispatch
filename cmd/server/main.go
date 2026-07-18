@@ -127,6 +127,9 @@ func main() {
 	appNotify := notify.NewDispatcher(deviceTokenRepo, notify.LogPusher{})
 	dispatchService.SetAppNotifier(appNotify)
 	dispatchService.SetRideEvents(rideEventRepo)
+	// N4：ride.assigned／ride.accepted 帶全程停靠點。漏了這行 WS payload 就不帶 stops，
+	// 司機 App 接單當下看不到全程清單與多點地圖（App 模擬器實跑抓到）。
+	dispatchService.SetStops(rideStopRepo)
 	deviceTokenService := service.NewDeviceTokenService(deviceTokenRepo)
 	rideService := service.NewRideService(customerRepo, rideRepo, redisStore, dispatchService)
 	rideService.SetStops(rideStopRepo) // N3：多乘客／多停靠點行程
