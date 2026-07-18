@@ -312,6 +312,11 @@ func (s *RideQueryService) TrackGeoJSON(rideID int64) (string, error) {
 	return fmt.Sprintf(`{"type":"Feature","properties":{"ride_id":%d},"geometry":%s}`, rideID, geojson), nil
 }
 
+// ListRecentByCustomer 乘客端「我的行程」歷史列表（新到舊）；只回本人訂單。
+func (s *RideQueryService) ListRecentByCustomer(customerID int64, limit int) ([]repository.CustomerRideRow, error) {
+	return s.rides.ListRecentByCustomer(customerID, limit)
+}
+
 // GetActiveRideByCustomer 找乘客目前進行中的訂單（App 啟動/重連取 ride_id 用），無進行中訂單回 (nil, nil)
 func (s *RideQueryService) GetActiveRideByCustomer(customerID int64) (*CustomerRideView, error) {
 	ride, err := s.rides.FindActiveByCustomer(customerID)
