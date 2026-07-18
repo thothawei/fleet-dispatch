@@ -124,7 +124,20 @@ func main() {
 		dispatchSettings,
 		hub,
 	)
-	appNotify := notify.NewDispatcher(deviceTokenRepo, notify.LogPusher{})
+	// A2：有 FCM 憑證就用真推播，否則降級成 LogPusher。
+	// **憑證問題不可讓服務起不來**——初始化失敗只打 log、照樣用 stub，派單路徑不受影響。
+	var appPusher notify.AppPusher = notify.LogPusher{}
+	if cfg.FCMCredentialsFile != "" {
+		if fcm, err := notify.NewFCMPusher(context.Background(), cfg.FCMCredentialsFile); err != nil {
+			log.Error().Err(err).Msg("FCM 初始化失敗，App 推播降級為 stub（派單不受影響）")
+		} else {
+			appPusher = fcm
+			log.Info().Msg("FCM 推播已啟用")
+		}
+	} else {
+		log.Info().Msg("未設定 FCM_CREDENTIALS_FILE，App 推播使用 stub")
+	}
+	appNotify := notify.NewDispatcher(deviceTokenRepo, appPusher)
 	dispatchService.SetAppNotifier(appNotify)
 	dispatchService.SetRideEvents(rideEventRepo)
 	// N4：ride.assigned／ride.accepted 帶全程停靠點。漏了這行 WS payload 就不帶 stops，

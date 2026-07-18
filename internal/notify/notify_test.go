@@ -11,17 +11,19 @@ type recordingPusher struct {
 		rideID  int64
 		title   string
 		body    string
+		data    map[string]string
 	}
 }
 
-func (r *recordingPusher) SendRideOffer(ctx context.Context, devices []Device, rideID int64, title, body string) error {
+func (r *recordingPusher) SendRideOffer(ctx context.Context, devices []Device, rideID int64, title, body string, data map[string]string) error {
 	_ = ctx
 	r.calls = append(r.calls, struct {
 		devices []Device
 		rideID  int64
 		title   string
 		body    string
-	}{devices, rideID, title, body})
+		data    map[string]string
+	}{devices, rideID, title, body, data})
 	return nil
 }
 
@@ -38,7 +40,8 @@ func TestDispatcher_NotifyDriverRideOffer(t *testing.T) {
 		7: {{Platform: PlatformFCM, Token: "tok-aaaa"}},
 	}, pusher)
 
-	d.NotifyDriverRideOffer(context.Background(), 7, 99, "新派單", "請開啟 App 接單")
+	d.NotifyDriverRideOffer(context.Background(), 7, 99, "新派單", "請開啟 App 接單",
+		map[string]string{"type": "ride.assigned", "ride_id": "99"})
 
 	if len(pusher.calls) != 1 {
 		t.Fatalf("預期送出 1 次，得到 %d", len(pusher.calls))
@@ -49,12 +52,16 @@ func TestDispatcher_NotifyDriverRideOffer(t *testing.T) {
 	if len(pusher.calls[0].devices) != 1 || pusher.calls[0].devices[0].Token != "tok-aaaa" {
 		t.Fatalf("devices=%v", pusher.calls[0].devices)
 	}
+	// data 要一路帶到 pusher（App 被殺喚醒接單卡靠它）。
+	if pusher.calls[0].data["type"] != "ride.assigned" || pusher.calls[0].data["ride_id"] != "99" {
+		t.Fatalf("data=%v", pusher.calls[0].data)
+	}
 }
 
 func TestDispatcher_無裝置時不送(t *testing.T) {
 	pusher := &recordingPusher{}
 	d := NewDispatcher(mapLookup{}, pusher)
-	d.NotifyDriverRideOffer(context.Background(), 1, 2, "t", "b")
+	d.NotifyDriverRideOffer(context.Background(), 1, 2, "t", "b", nil)
 	if len(pusher.calls) != 0 {
 		t.Fatalf("不應送出，得到 %d", len(pusher.calls))
 	}

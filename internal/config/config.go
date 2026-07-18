@@ -49,6 +49,10 @@ type Config struct {
 
 	AdminSeedUsername string
 	AdminSeedPassword string
+
+	// FCMCredentialsFile Firebase 服務帳戶 JSON 路徑（A2 真推播）。
+	// 空＝不啟用 FCM，App 推播走 LogPusher stub（派單路徑照走，只是不真的推）。
+	FCMCredentialsFile string
 }
 
 // Load 讀取環境變數，缺省值對應本地 docker-compose
@@ -86,6 +90,8 @@ func Load() (*Config, error) {
 
 		AdminSeedUsername: getEnv("ADMIN_SEED_USERNAME", ""),
 		AdminSeedPassword: getEnv("ADMIN_SEED_PASSWORD", ""),
+
+		FCMCredentialsFile: getEnv("FCM_CREDENTIALS_FILE", ""),
 	}
 	return cfg, nil
 }
