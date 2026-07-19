@@ -77,6 +77,10 @@ func newRequiredVehicleFixture(t *testing.T, prefix string, offerTimeoutSec int)
 		if err := drivers.UpdateVehicle(d.ID, spec.vType, spec.plate); err != nil {
 			t.Fatalf("設定車輛失敗：%v", err)
 		}
+		// O5：填車輛只到 pending，這批測試司機都要核准才進得了派單候選。
+		if err := drivers.UpdateVehicleReview(d.ID, constants.VehicleReviewApproved, ""); err != nil {
+			t.Fatalf("核准車輛失敗：%v", err)
+		}
 		if err := redisStore.UpdateDriverLocation(ctx, d.ID, 25.031, 121.561); err != nil {
 			t.Fatalf("寫入司機位置失敗：%v", err)
 		}

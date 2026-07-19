@@ -310,6 +310,7 @@ func main() {
 			ops.Use(middleware.RequireAdminRole(auth.RoleDispatcher))
 			{
 				ops.PATCH("/drivers/:id/status", adminHandler.PatchDriverStatus)
+				ops.POST("/drivers/:id/vehicle-review", adminHandler.ReviewDriverVehicle)
 				ops.PUT("/settings/dispatch", adminHandler.PutDispatchSettings)
 				ops.POST("/rides/:id/cancel", adminHandler.CancelRide)
 			}

@@ -123,15 +123,26 @@ type Driver struct {
 	// 未設定的司機不得被派單／接單（O3），且它是清潔費（O6）與派單車種過濾（P3）的判斷依據。
 	VehicleType string `gorm:"column:vehicle_type;not null;default:''" json:"vehicle_type"`
 	// PlateNumber 車牌（O1）：非空時唯一（partial unique index），'' 為未設定。
-	PlateNumber  string    `gorm:"column:plate_number;not null;default:''" json:"plate_number"`
-	PasswordHash string    `gorm:"column:password_hash;not null;default:''" json:"-"`
-	CreatedAt    time.Time `gorm:"not null"`
-	UpdatedAt    time.Time `gorm:"not null"`
+	PlateNumber string `gorm:"column:plate_number;not null;default:''" json:"plate_number"`
+	// VehicleReviewStatus 車輛審核狀態（O5）：constants.VehicleReview* 之一。
+	// gate 讀它（approved 才能接單）；填/改車輛→pending，admin 核准/退回改它。
+	VehicleReviewStatus string `gorm:"column:vehicle_review_status;not null;default:''" json:"vehicle_review_status"`
+	// VehicleReviewNote 退回原因（O5）：rejected 時給司機看，其餘為空。
+	VehicleReviewNote string    `gorm:"column:vehicle_review_note;not null;default:''" json:"vehicle_review_note"`
+	PasswordHash      string    `gorm:"column:password_hash;not null;default:''" json:"-"`
+	CreatedAt         time.Time `gorm:"not null"`
+	UpdatedAt         time.Time `gorm:"not null"`
 }
 
-// HasVehicle 是否已填妥車輛資訊；未填者不得被派單／接單（O3 gate）。
+// HasVehicle 是否已填妥車輛資訊（O2）。是「填了沒」，不是「能不能接單」——
+// 後者要看審核（VehicleApproved）。App 用它決定要不要顯示強制設定頁。
 func (d Driver) HasVehicle() bool {
 	return d.VehicleType != "" && d.PlateNumber != ""
+}
+
+// VehicleApproved 車輛是否已通過審核（O5 gate）：唯有已核准才得被派單／接單。
+func (d Driver) VehicleApproved() bool {
+	return d.VehicleReviewStatus == "approved"
 }
 
 func (Driver) TableName() string {

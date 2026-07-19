@@ -68,13 +68,18 @@ func (h *DriverHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, driverPublic(d))
 }
 
-// driverVehicle 車輛資訊的回應形狀（O2）。附 `has_vehicle` 讓 App 不必自行判斷
-// 「兩欄皆非空」就知道能不能接單（與 O3 gate 同一條件）。
+// driverVehicle 車輛資訊的回應形狀（O2／O5）。
+// `has_vehicle`＝填了沒（App 決定是否顯示強制設定頁）；
+// `review_status`＝審核狀態（App 四態路由：pending 審核中／rejected 已退回+原因）；
+// `can_accept`＝能不能接單（O5 gate ＝已核准），App 用它就不必自行推導審核邏輯。
 func driverVehicle(d *model.Driver) gin.H {
 	return gin.H{
-		"vehicle_type": d.VehicleType,
-		"plate_number": d.PlateNumber,
-		"has_vehicle":  d.HasVehicle(),
+		"vehicle_type":  d.VehicleType,
+		"plate_number":  d.PlateNumber,
+		"has_vehicle":   d.HasVehicle(),
+		"review_status": d.VehicleReviewStatus,
+		"review_note":   d.VehicleReviewNote,
+		"can_accept":    d.VehicleApproved(),
 	}
 }
 

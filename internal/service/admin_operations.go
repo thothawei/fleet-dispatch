@@ -59,6 +59,32 @@ func (a *AdminOperations) SetDriverEnabled(ctx context.Context, driverID int64, 
 	return d, nil
 }
 
+// ReviewDriverVehicle 後台審核司機車輛（O5）。approve→approved（清原因）；
+// reject→rejected+原因。只有「待審核」的司機能審——避免誤審已核准者或沒填車輛者。
+// 退回必須附原因（司機要知道哪裡不對才能修）。
+func (a *AdminOperations) ReviewDriverVehicle(driverID int64, approve bool, note string) (*model.Driver, error) {
+	d, err := a.drivers.FindByID(driverID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	if d.VehicleReviewStatus != constants.VehicleReviewPending {
+		return nil, ErrVehicleNotPending
+	}
+	status, resultNote := constants.VehicleReviewApproved, ""
+	if !approve {
+		if note == "" {
+			return nil, ErrRejectNoteRequired
+		}
+		status, resultNote = constants.VehicleReviewRejected, note
+	}
+	if err := a.drivers.UpdateVehicleReview(driverID, status, resultNote); err != nil {
+		return nil, err
+	}
+	d.VehicleReviewStatus = status
+	d.VehicleReviewNote = resultNote
+	return d, nil
+}
+
 // CancelRideByAdmin 後台強制取消訂單（沿用 cancelActiveRide 核心，已上車不可取消）。
 func (a *AdminOperations) CancelRideByAdmin(ctx context.Context, rideID int64) (string, error) {
 	ride, err := a.dispatch.rides.GetByID(rideID)

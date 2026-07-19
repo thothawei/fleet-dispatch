@@ -41,7 +41,17 @@ func TestDriverSetVehicle(t *testing.T) {
 			t.Fatalf("DB 內車牌應為正規化後的 ABC-1234，得到 %q", reread.PlateNumber)
 		}
 		if !reread.HasVehicle() {
-			t.Fatal("填妥車輛資訊後 HasVehicle() 應為 true（O3 gate 的條件）")
+			t.Fatal("填妥車輛資訊後 HasVehicle() 應為 true（O2 的條件）")
+		}
+		// O5：填/改車輛後進 pending，還不能接單（要 admin 核准）。
+		if got.VehicleReviewStatus != "pending" {
+			t.Fatalf("設定車輛後應為 pending 待審核，得到 %q", got.VehicleReviewStatus)
+		}
+		if reread.VehicleReviewStatus != "pending" {
+			t.Fatalf("DB 內審核狀態應為 pending，得到 %q", reread.VehicleReviewStatus)
+		}
+		if reread.VehicleApproved() {
+			t.Fatal("待審核的司機 VehicleApproved() 應為 false（O5 gate）")
 		}
 	})
 

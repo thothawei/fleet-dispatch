@@ -219,12 +219,25 @@ func (r *DriverRepository) UpdateVehicle(id int64, vehicleType, plateNumber stri
 	err := r.db.Model(&model.Driver{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"vehicle_type": vehicleType,
 		"plate_number": plateNumber,
-		"updated_at":   time.Now(),
+		// O5：填/改車輛一律回 pending 並清掉退回原因——原子地與車輛欄位一起寫，
+		// 避免「改了車卻還掛著上一次的 approved」讓未審核的新車直接能接單。
+		"vehicle_review_status": constants.VehicleReviewPending,
+		"vehicle_review_note":   "",
+		"updated_at":            time.Now(),
 	}).Error
 	if isPlateConflict(err) {
 		return ErrPlateTaken
 	}
 	return err
+}
+
+// UpdateVehicleReview 後台審核結果（O5）：approve→approved、reject→rejected+原因。
+func (r *DriverRepository) UpdateVehicleReview(id int64, status, note string) error {
+	return r.db.Model(&model.Driver{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"vehicle_review_status": status,
+		"vehicle_review_note":   note,
+		"updated_at":            time.Now(),
+	}).Error
 }
 
 // isPlateConflict 判斷是否為車牌唯一索引衝突。以 PgError 的 code + 約束名判斷，
