@@ -862,6 +862,43 @@ func (r *RideRepository) ListRecent(status *int16, limit int) ([]AdminRideRow, e
 	return rows, err
 }
 
+// CustomerRideRow 是乘客端「我的行程」列表的單列：夠渲染歷史清單與開對話即可。
+// DriverName 只在有派到司機時非空（LEFT JOIN），前端據此決定要不要顯示「聯絡司機」。
+type CustomerRideRow struct {
+	ID              int64      `json:"id"`
+	Status          int16      `json:"status"`
+	PickupAddress   string     `json:"pickup_address"`
+	DropoffAddress  string     `json:"dropoff_address"`
+	RequestedAt     time.Time  `json:"requested_at"`
+	CompletedAt     *time.Time `json:"completed_at"`
+	FareAmountCents *int64     `json:"fare_amount_cents"`
+	DriverID        *int64     `json:"driver_id"`
+	DriverName      *string    `json:"driver_name"`
+}
+
+const CustomerRideListDefaultLimit = 20
+
+// ListRecentByCustomer 取某乘客最近的行程（新到舊）。**只回本人訂單**（呼叫端已由
+// CustomerAuth 綁定 customerID）。limit<=0 用預設、超過硬上限收斂到 MaxListRows。
+func (r *RideRepository) ListRecentByCustomer(customerID int64, limit int) ([]CustomerRideRow, error) {
+	if limit <= 0 {
+		limit = CustomerRideListDefaultLimit
+	}
+	if limit > MaxListRows {
+		limit = MaxListRows
+	}
+	var rows []CustomerRideRow
+	err := r.db.Model(&model.Ride{}).
+		Select("rides.id", "rides.status", "rides.pickup_address", "rides.dropoff_address",
+			"rides.requested_at", "rides.completed_at", "rides.fare_amount_cents",
+			"rides.driver_id", "drivers.name AS driver_name").
+		Joins("LEFT JOIN drivers ON drivers.id = rides.driver_id").
+		Where("rides.customer_id = ?", customerID).
+		Order("rides.id DESC").Limit(limit).
+		Scan(&rows).Error
+	return rows, err
+}
+
 type AdminRepository struct {
 	db *gorm.DB
 }

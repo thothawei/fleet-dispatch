@@ -229,6 +229,7 @@ func main() {
 		{
 			customerAuthed.POST("/rides", rideHandler.Create)
 			customerAuthed.GET("/customer/fees", customerHandler.Fees)
+			customerAuthed.GET("/customer/rides", rideHandler.HistoryByCustomer)
 			customerAuthed.GET("/customer/rides/active", rideHandler.ActiveByCustomer)
 			customerAuthed.GET("/customer/rides/:id", rideHandler.GetByCustomer)
 			customerAuthed.POST("/rides/:id/cancel-by-customer", rideHandler.CancelByCustomer)

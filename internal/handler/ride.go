@@ -292,6 +292,24 @@ func (h *RideHandler) ActiveByCustomer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ride": ride})
 }
 
+// HistoryByCustomer GET /api/customer/rides — 乘客「我的行程」歷史列表（新到舊，只回本人）。
+// 供「事後聯絡司機」的入口：清單每筆有司機者可開對話（留言板入口補遺）。
+func (h *RideHandler) HistoryByCustomer(c *gin.Context) {
+	customerID := middleware.CustomerIDFromCtx(c)
+	limit := 0 // 0 = repo 用預設；非法值也退回預設
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	rows, err := h.rides.ListRecentByCustomer(customerID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"rides": rows})
+}
+
 // GetByCustomer GET /api/customer/rides/:id — 乘客查自己單一訂單狀態/司機/ETA，非本人訂單回 403/404
 func (h *RideHandler) GetByCustomer(c *gin.Context) {
 	rideID, err := strconv.ParseInt(c.Param("id"), 10, 64)
