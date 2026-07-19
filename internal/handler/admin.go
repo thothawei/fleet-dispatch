@@ -343,6 +343,39 @@ func (h *AdminHandler) PatchDriverStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"driver": driver})
 }
 
+// ReviewDriverVehicle POST /api/admin/drivers/:id/vehicle-review — 車輛審核（O5）。
+// body: {approve: bool, note?: string}。approve=false 時 note 必填（退回原因）。
+func (h *AdminHandler) ReviewDriverVehicle(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	var req struct {
+		Approve bool   `json:"approve"`
+		Note    string `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	driver, err := h.adminOps.ReviewDriverVehicle(id, req.Approve, strings.TrimSpace(req.Note))
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "找不到司機"})
+		case errors.Is(err, service.ErrVehicleNotPending):
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrRejectNoteRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"driver": driver})
+}
+
 // GetDispatchSettings GET /api/admin/settings/dispatch
 func (h *AdminHandler) GetDispatchSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, h.dispatchSettings.JSON())

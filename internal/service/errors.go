@@ -19,4 +19,11 @@ var (
 	// ErrDriverNoVehicle O3 gate：未填車輛資訊者不得接單。訊息會原樣回給司機
 	// （API 走 statusForErr → 409；LINE 走 webhook 的 err.Error() 文字回覆）。
 	ErrDriverNoVehicle = errors.New("請先填寫車種與車牌才能接單")
+	// ErrDriverNotApproved O5 gate：填了但尚未通過審核者不得接單。與 NoVehicle 分開，
+	// 讓司機知道是「等審核」而非「沒填」（App 端正常會走等待畫面，這是直打 API 的防線）。
+	ErrDriverNotApproved = errors.New("車輛審核中，通過後才能接單")
+	// ErrVehicleNotPending O5：只有「待審核」的司機能被審核（避免誤審已核准或沒填車輛者）。
+	ErrVehicleNotPending = errors.New("該司機車輛不在待審核狀態")
+	// ErrRejectNoteRequired O5：退回必須附原因（司機要知道哪裡不對）。
+	ErrRejectNoteRequired = errors.New("退回車輛審核必須填寫原因")
 )

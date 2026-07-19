@@ -17,6 +17,16 @@ const (
 	VehicleTypePet        = "pet"        // 寵物用車（乘客指定此車種時加收清潔費，見 O6／P）
 )
 
+// 車輛審核狀態（O5 定案 2026-07-19）。司機填/改車輛後進 Pending，admin 核准才能接單。
+// 值域由 DB CHECK `chk_drivers_vehicle_review_status` 把關（migration 000022）。
+// 導入時既有已填車輛的司機祖父化為 Approved（migration 一次性 UPDATE），不因導入被鎖出。
+const (
+	VehicleReviewNone     = ""         // 未提交（沒填車輛）
+	VehicleReviewPending  = "pending"  // 待審核（填了/改了，等 admin）
+	VehicleReviewApproved = "approved" // 已核准（可接單）
+	VehicleReviewRejected = "rejected" // 已退回（附原因，可重填）
+)
+
 // vehicleTypes 白名單；順序即前端建議的顯示順序。
 var vehicleTypes = []string{
 	VehicleTypeSedan,

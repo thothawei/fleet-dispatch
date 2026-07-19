@@ -144,8 +144,8 @@ func (s *DispatchService) dispatchRound(rideID int64, attempt int, offered map[i
 		if err != nil || driver.Status != constants.DriverStatusIdle {
 			continue
 		}
-		// O3 gate：未填車種／車牌者不派單。既有司機一律如此，直到填完（拍板：無寬限期）。
-		if !driver.HasVehicle() {
+		// O5 gate：車輛未通過審核者不派單（O3「有填」升級為「已審核」，拍板：無寬限期）。
+		if !driver.VehicleApproved() {
 			continue
 		}
 		// P3：乘客指定車種時只派同車種的司機。**不降級**（P4 拍板）——寵物車／無障礙車是硬需求，
@@ -502,12 +502,16 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		s.redis.ReleaseRideLock(ctx, rideID)
 		return "", err
 	}
-	// O3 gate：未填車輛資訊者不得接單。派單已先過濾（dispatchRound），這裡擋的是
+	// O5 gate：車輛未通過審核者不得接單。派單已先過濾（dispatchRound），這裡擋的是
 	// 直接打 API／LINE 的路徑——只靠 App 端跳轉擋不住。
-	// 排在狀態檢查之前：這是接單資格問題，回「非待命狀態」會讓司機不知道要去填車輛。
-	if !driver.HasVehicle() {
+	// 排在狀態檢查之前：這是接單資格問題，回「非待命狀態」會讓司機不知道原因。
+	// 分「沒填」與「填了待審核」兩種訊息，司機才知道下一步該做什麼。
+	if !driver.VehicleApproved() {
 		s.redis.ReleaseRideLock(ctx, rideID)
-		return "", ErrDriverNoVehicle
+		if !driver.HasVehicle() {
+			return "", ErrDriverNoVehicle
+		}
+		return "", ErrDriverNotApproved
 	}
 	if driver.Status != constants.DriverStatusIdle {
 		s.redis.ReleaseRideLock(ctx, rideID)

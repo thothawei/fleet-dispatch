@@ -81,6 +81,9 @@ func (s *DriverRegistry) SetVehicle(driverID int64, vehicleType, plateNumber str
 	}
 	d.VehicleType = vehicleType
 	d.PlateNumber = plate
+	// O5：填/改車輛回 pending 待審核（repo 已原子寫入，這裡同步回傳物件）。
+	d.VehicleReviewStatus = constants.VehicleReviewPending
+	d.VehicleReviewNote = ""
 	return d, nil
 }
 
