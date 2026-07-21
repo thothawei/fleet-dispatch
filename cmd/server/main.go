@@ -247,6 +247,7 @@ func main() {
 		authed.Use(middleware.DriverAuth(cfg.JWTSecret))
 		{
 			authed.GET("/driver/me", driverHandler.Me)
+			authed.PUT("/driver/profile", driverHandler.UpdateProfile)
 			authed.GET("/driver/vehicle", driverHandler.Vehicle)
 			authed.PUT("/driver/vehicle", driverHandler.UpdateVehicle)
 			authed.GET("/driver/earnings", driverHandler.Earnings)

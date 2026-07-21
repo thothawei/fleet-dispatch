@@ -250,6 +250,16 @@ func isPlateConflict(err error) bool {
 	return pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == "uq_drivers_plate_number"
 }
 
+// UpdatePhone 只更新聯絡電話。**刻意不與 UpdateVehicle 共用**——
+// 那條路徑會把 vehicle_review_status 重置為 pending，若把電話併進去，
+// 司機改一次電話就會被 O5 gate 踢回「審核中」而無法接單。
+func (r *DriverRepository) UpdatePhone(id int64, phone string) error {
+	return r.db.Model(&model.Driver{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"phone":      phone,
+		"updated_at": time.Now(),
+	}).Error
+}
+
 func (r *DriverRepository) SetPassword(id int64, passwordHash string) error {
 	return r.db.Model(&model.Driver{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"password_hash": passwordHash,
