@@ -162,6 +162,7 @@ func main() {
 	rideQueryService.SetDrivers(driverRepo) // O4／O7：乘客查自己訂單時附司機姓名／電話
 	rideQueryService.SetStops(rideStopRepo) // N6：司機端 active 帶全程停靠點
 	rideStopService := service.NewRideStopService(rideRepo, rideStopRepo)
+	rideStopService.SetPublisher(hub) // N7：到站／跳過即時推給乘客（行程進度）
 	chatService := service.NewChatService(rideRepo, rideMessageRepo, hub)
 	lostItemService := service.NewLostItemService(rideRepo, lostItemRepo, feeSettings, hub)
 

@@ -25,6 +25,9 @@ const (
 	TypeChatMessage      = "chat.message"      // 行程內對話訊息（乘客↔司機即時遞送）
 	TypeLostItemCreated  = "lost_item.created" // 乘客建立遺失物協尋單
 	TypeLostItemUpdated  = "lost_item.updated" // 協尋單狀態變更（found/paid/returned/closed）
+	// TypeRideStopUpdated 司機標記到達／跳過某一站（N7）。payload 帶**整趟 stops**，
+	// 收到整批覆蓋即可，不必自己套用差異——乘客端據此顯示「走到第幾站」。
+	TypeRideStopUpdated = "ride.stop_updated"
 )
 
 // 審計 actor_role

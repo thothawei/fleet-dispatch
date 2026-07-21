@@ -259,7 +259,8 @@ func NewRideQueryService(tracks *repository.TrackRepository, rides *repository.R
 	return &RideQueryService{tracks: tracks, rides: rides}
 }
 
-// SetStops 注入停靠點 repo（供司機端 active 帶 stops，N6）；可選——
+// SetStops 注入停靠點 repo（司機端 active 帶 stops＝N6；乘客端 active／單筆查詢
+// 也帶同樣的 stops，供乘客看自己排的行程進度）；可選——
 // 未注入時單點與多停靠點行程皆可查，只是後者不帶 stops。
 func (s *RideQueryService) SetStops(stops *repository.RideStopRepository) {
 	s.stops = stops
@@ -284,6 +285,10 @@ type CustomerRideView struct {
 	// DriverPhone 明碼（O7 拍板）。**僅該趟乘客可見**——本 struct 只由
 	// 「乘客查自己訂單」的路徑產生，絕不可用於任何列表或對其他角色的回應。
 	DriverPhone string `json:"driver_phone,omitempty"`
+	// Stops 全程停靠點（N）。乘客送得出 stops（建單時），也要看得到自己排的行程
+	// 走到哪一站——形狀與司機端的 DriverRideView.Stops **完全相同**，
+	// App 端兩邊共用同一套解析。單點訂單為 nil（omitempty），既有形狀不變。
+	Stops []map[string]any `json:"stops,omitempty"`
 }
 
 // withDriverContact 補上司機姓名／電話；未接單或未注入 drivers 時原樣回傳。
@@ -301,6 +306,21 @@ func (s *RideQueryService) withDriverContact(ride *model.Ride) *CustomerRideView
 	}
 	view.DriverName = d.Name
 	view.DriverPhone = d.Phone
+	return view
+}
+
+// customerRideView 乘客視角的完整訂單：司機聯絡資訊 ＋ 全程停靠點。
+//
+// 停靠點讀失敗**不擋**整筆查詢——乘客仍能看到行程狀態與司機資訊，
+// 這與司機端 GetActiveRideByDriver 的處理一致（stops 是加值資訊，不是行程本體）。
+func (s *RideQueryService) customerRideView(ride *model.Ride) *CustomerRideView {
+	view := s.withDriverContact(ride)
+	if view == nil || s.stops == nil {
+		return view
+	}
+	if stops, err := s.stops.ListByRide(ride.ID); err == nil {
+		view.Stops = stopViews(stops)
+	}
 	return view
 }
 
@@ -323,7 +343,7 @@ func (s *RideQueryService) GetActiveRideByCustomer(customerID int64) (*CustomerR
 	if err != nil || ride == nil {
 		return nil, err
 	}
-	return s.withDriverContact(ride), nil
+	return s.customerRideView(ride), nil
 }
 
 // GetActiveRideByDriver 找司機目前進行中的訂單（已接/載客中），供 App 中途重啟恢復行程；無則回 (nil, nil)
@@ -378,5 +398,5 @@ func (s *RideQueryService) GetRideForCustomer(customerID, rideID int64) (*Custom
 	}
 	// 這條路徑也是遺失物協尋回頭查「當時搭哪台車、怎麼聯絡司機」的來源（O7），
 	// 沒有時間限制：行程完成很久之後，本人仍查得到。
-	return s.withDriverContact(ride), nil
+	return s.customerRideView(ride), nil
 }

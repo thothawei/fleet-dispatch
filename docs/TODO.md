@@ -375,6 +375,30 @@
       以及 `arrived_at`／`skipped_at`（**只在真的發生時帶**，兩者皆無＝待處理）——
       司機據此知道「下一站是誰、在哪、處理了沒」。
 
+- [x] **N8. 乘客端行程 API 帶 stops ＋ 進度事件** ✅ **已實作（2026-07-21）**
+      **缺口是 App 端回報的**：乘客送得出 stops（建單時），卻**看不到自己排的行程**——
+      `CustomerRideView` 只加了司機聯絡資訊，帶 stops 的只有 `DriverRideView`。
+      乘客端因此做不出多停靠點地圖與行程進度。
+
+      1. **`CustomerRideView` 加 `Stops`**（`omitempty`）：
+         `GET /api/customer/rides/active` 與 `GET /api/customer/rides/:id` 都帶，
+         **形狀與 `DriverRideView.Stops` 完全相同**（實跑比對過欄位集合一致），
+         App 端兩邊共用同一套解析。單筆查詢也帶，歷史行程／遺失物協尋回頭查才看得到當時全程。
+         讀 stops 失敗**不擋**整筆查詢（stops 是加值資訊，不是行程本體），
+         未注入 `stops` repo 時查詢照樣成功。
+      2. **新事件 `ride.stop_updated`**：司機標記到達／跳過時推給**本趟乘客**。
+         payload 帶**整趟 stops** 而非單一 stop——乘客端收到直接覆蓋即可，
+         不必在客戶端套用差異，漏收一則事件也不會讓狀態永遠對不上。
+         **標記失敗（重複標記回 409）時不推事件**，否則乘客會收到「進度更新」卻什麼都沒變。
+         publisher 未注入時標記照樣成功（只是乘客要等下一次輪詢）。
+
+      **驗收**：`go test ./internal/service/`（新增 9 項，含反向確認——
+      把乘客路徑改回 `withDriverContact` 會 FAIL）、events／handler 測試綠；
+      **docker live E2E**：乘客建 2 人 4 站訂單 → 乘客 active 回 4 站 →
+      司機接單 → `arrive` 第 1 站 → **乘客 WS 即時收到 `ride.stop_updated`（帶整趟＋`arrived_at`）**
+      → `skip` 第 2 站 → 乘客 active 顯示「已到達／已跳過／待處理／待處理」，
+      與司機端 `GET /api/driver/rides/active` 欄位形狀一致。
+
 - [x] **N7. 到站／跳過標記** ✅ **已實作（2026-07-17）**
       （原標「可選」；因 2026-07-17 拍板「司機可跳過缺席乘客」而成為必要）
       `POST /api/rides/:id/stops/:stop_id/arrive`／`POST /api/rides/:id/stops/:stop_id/skip`
