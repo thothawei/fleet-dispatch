@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"line-fleet-dispatch/internal/constants"
+	"line-fleet-dispatch/internal/events"
 	"line-fleet-dispatch/internal/model"
 	"line-fleet-dispatch/internal/repository"
 )
@@ -66,12 +67,19 @@ type DriverRideView struct {
 
 // RideStopService 停靠點的讀取與標記（N6／N7）。
 type RideStopService struct {
-	rides *repository.RideRepository
-	stops *repository.RideStopRepository
+	rides     *repository.RideRepository
+	stops     *repository.RideStopRepository
+	publisher events.Publisher
 }
 
 func NewRideStopService(rides *repository.RideRepository, stops *repository.RideStopRepository) *RideStopService {
 	return &RideStopService{rides: rides, stops: stops}
+}
+
+// SetPublisher 注入事件發佈器，讓到站／跳過即時推給乘客；可選——
+// 未注入時標記照樣成功，乘客只是要等下一次輪詢才看得到進度。
+func (s *RideStopService) SetPublisher(p events.Publisher) {
+	s.publisher = p
 }
 
 // ListForDriver 司機讀取自己那趟的停靠點；非被指派司機回 ErrForbidden。
@@ -127,5 +135,29 @@ func (s *RideStopService) mark(driverID, rideID, stopID int64, do func(int64) (b
 	if !ok {
 		return ErrStopAlreadyHandled // 已到達或已跳過，不覆寫
 	}
+	s.publishStops(ride.ID, ride.CustomerID)
 	return nil
+}
+
+// publishStops 把**整趟**最新停靠點推給乘客（司機端剛做完動作、會自己重讀 active）。
+//
+// 帶整批而非單一 stop：乘客端收到直接覆蓋即可，不必在客戶端套用差異，
+// 也不怕漏收某一則事件後狀態就永遠對不上。
+// 讀失敗／未注入 publisher 都不影響標記本身——標記已經寫進 DB 了。
+func (s *RideStopService) publishStops(rideID, customerID int64) {
+	if s.publisher == nil {
+		return
+	}
+	stops, err := s.stops.ListByRide(rideID)
+	if err != nil {
+		return
+	}
+	s.publisher.Publish(
+		events.Recipient{Role: events.RoleCustomer, ID: customerID},
+		events.Event{
+			Type:    events.TypeRideStopUpdated,
+			RideID:  rideID,
+			Payload: map[string]any{"stops": stopViews(stops)},
+		},
+	)
 }
