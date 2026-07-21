@@ -68,6 +68,37 @@ func (h *DriverHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, driverPublic(d))
 }
 
+// UpdateProfile PUT /api/driver/profile — 司機自己的聯絡電話。
+// driver_id 一律取自 token，司機只能改自己的。
+//
+// **刻意與 PUT /driver/vehicle 分開**：那支會把車輛審核重置為 pending（O5），
+// 改電話若走同一支，司機每改一次號碼就會被鎖出接單。
+//
+// `phone` 傳空字串＝清除號碼（乘客端撥號按鈕隨之消失），故不加 `binding:"required"`。
+func (h *DriverHandler) UpdateProfile(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
+	var req struct {
+		Phone string `json:"phone"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	d, err := h.drivers.SetPhone(driverID, req.Phone)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidPhone):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "找不到司機"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, driverPublic(d))
+}
+
 // driverVehicle 車輛資訊的回應形狀（O2／O5）。
 // `has_vehicle`＝填了沒（App 決定是否顯示強制設定頁）；
 // `review_status`＝審核狀態（App 四態路由：pending 審核中／rejected 已退回+原因）；

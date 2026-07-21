@@ -58,6 +58,32 @@ func (s *DriverRegistry) Me(driverID int64) (*model.Driver, error) {
 	return s.drivers.FindByID(driverID)
 }
 
+// SetPhone 設定司機聯絡電話。乘客端在「司機前往上車點」階段用這支號碼撥打（O7），
+// 在此之前 drivers.phone 沒有任何寫入路徑，撥號按鈕因而永遠不顯示。
+//
+// **與 SetVehicle 分開是刻意的**：SetVehicle 會把車輛審核重置為 pending，
+// 而改電話不該讓司機被 O5 gate 鎖出接單。
+//
+// 傳入空字串代表「清除電話」（司機不想公開號碼），此時乘客端整塊撥號按鈕不顯示。
+func (s *DriverRegistry) SetPhone(driverID int64, phone string) (*model.Driver, error) {
+	normalized := constants.NormalizePhone(phone)
+	if normalized != "" && !constants.IsValidPhone(normalized) {
+		return nil, ErrInvalidPhone
+	}
+	d, err := s.drivers.FindByID(driverID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if err := s.drivers.UpdatePhone(driverID, normalized); err != nil {
+		return nil, err
+	}
+	d.Phone = normalized
+	return d, nil
+}
+
 // SetVehicle 設定司機車輛資訊（O2）：車種須為白名單 code，車牌正規化後做寬鬆格式檢查。
 // 兩者皆必填——留空等同「未設定」，會讓司機繞過 O3 的接單 gate。
 // 車牌與其他司機重複時回 repository.ErrPlateTaken。
