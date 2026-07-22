@@ -35,6 +35,7 @@ type AdminHandler struct {
 	feeSettings        *service.FeeSettings
 	membershipInvoices *repository.MembershipInvoiceRepository
 	lostItems          *repository.LostItemRepository
+	rideStops          *repository.RideStopRepository
 	redis              *redisstore.Store
 	jwtSecret          string
 	jwtExpiryHours     int
@@ -53,6 +54,12 @@ func (h *AdminHandler) SetMembershipInvoices(repo *repository.MembershipInvoiceR
 // SetLostItems 注入協尋單 repo（供 /lost-items 總覽）；可選。
 func (h *AdminHandler) SetLostItems(repo *repository.LostItemRepository) {
 	h.lostItems = repo
+}
+
+// SetRideStops 注入停靠點 repo（供訂單詳情列出多停靠點，N）；可選——
+// 未注入時訂單詳情照樣回應，只是不帶 stops（單點訂單本來就沒有）。
+func (h *AdminHandler) SetRideStops(repo *repository.RideStopRepository) {
+	h.rideStops = repo
 }
 
 func NewAdminHandler(
@@ -269,7 +276,18 @@ func (h *AdminHandler) RideDetail(c *gin.Context) {
 	if evts == nil {
 		evts = []model.RideEvent{}
 	}
-	c.JSON(http.StatusOK, gin.H{"ride": ride, "track_geojson": geojson, "events": evts})
+	resp := gin.H{"ride": ride, "track_geojson": geojson, "events": evts}
+	// 多停靠點行程（N）：客服要能回答「這趟到底載了誰、停了哪幾站、哪站被跳過」。
+	// 停靠點讀取失敗**不擋整個詳情頁**——訂單本體與軌跡比停靠點重要得多，
+	// 沒有 stops 鍵時前端退回原本的單一上車／下車呈現。
+	if h.rideStops != nil {
+		if stops, err := h.rideStops.ListByRide(id); err == nil {
+			if views := service.StopViews(stops); views != nil {
+				resp["stops"] = views
+			}
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // DailyReport GET /api/admin/reports/daily?date=2026-07-06

@@ -68,14 +68,46 @@ func (h *DriverHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, driverPublic(d))
 }
 
+// UpdateProfile PUT /api/driver/profile — 司機自己的聯絡資料（目前只有電話，O7）。
+// driver_id 一律取自 token，司機只能改自己的。
+// **與 /driver/vehicle 分開**：電話不是車輛屬性，改電話不該讓車輛回到待審核（O5）。
+func (h *DriverHandler) UpdateProfile(c *gin.Context) {
+	driverID := middleware.DriverIDFromCtx(c)
+	var req struct {
+		Phone string `json:"phone" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	d, err := h.drivers.SetPhone(driverID, req.Phone)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidPhone):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, service.ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "找不到司機"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, driverPublic(d))
+}
+
 // driverVehicle 車輛資訊的回應形狀（O2／O5）。
 // `has_vehicle`＝填了沒（App 決定是否顯示強制設定頁）；
 // `review_status`＝審核狀態（App 四態路由：pending 審核中／rejected 已退回+原因）；
 // `can_accept`＝能不能接單（O5 gate ＝已核准），App 用它就不必自行推導審核邏輯。
+//
+// `phone` 是**唯讀便利欄位**（O7）：司機設定頁同時要填車輛與聯絡電話，
+// 一次讀完省一支往返。寫入仍走各自的端點——改電話不該讓車輛回到待審核（O5），
+// 所以 PUT /driver/profile 與 PUT /driver/vehicle 是分開的。
 func driverVehicle(d *model.Driver) gin.H {
 	return gin.H{
 		"vehicle_type":  d.VehicleType,
 		"plate_number":  d.PlateNumber,
+		"phone":         d.Phone,
 		"has_vehicle":   d.HasVehicle(),
 		"review_status": d.VehicleReviewStatus,
 		"review_note":   d.VehicleReviewNote,

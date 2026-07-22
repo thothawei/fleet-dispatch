@@ -203,6 +203,7 @@ func main() {
 	adminHandler.SetFeeSettings(feeSettings)
 	adminHandler.SetMembershipInvoices(membershipInvoiceRepo)
 	adminHandler.SetLostItems(lostItemRepo)
+	adminHandler.SetRideStops(rideStopRepo)
 
 	// 乘客認證：註冊/登入（line_user_id + 密碼 JWT）
 	customerRegistry := service.NewCustomerRegistry(customerRepo)
@@ -247,6 +248,7 @@ func main() {
 		authed.Use(middleware.DriverAuth(cfg.JWTSecret))
 		{
 			authed.GET("/driver/me", driverHandler.Me)
+			authed.PUT("/driver/profile", driverHandler.UpdateProfile)
 			authed.GET("/driver/vehicle", driverHandler.Vehicle)
 			authed.PUT("/driver/vehicle", driverHandler.UpdateVehicle)
 			authed.GET("/driver/earnings", driverHandler.Earnings)

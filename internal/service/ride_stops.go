@@ -57,6 +57,13 @@ func stopViews(stops []model.RideStop) []map[string]any {
 	return out
 }
 
+// StopViews 對外公開的停靠點序列化（admin 訂單詳情用）。
+// 刻意與司機／乘客端共用同一個 stopView——三端看到的停靠點形狀必須一模一樣，
+// 否則客服在後台看到的站序／到達時間會與司機 App 說法不同。
+func StopViews(stops []model.RideStop) []map[string]any {
+	return stopViews(stops)
+}
+
 // DriverRideView 司機視角的進行中訂單：ride 全欄位 ＋ 全程停靠點（N6）。
 // 內嵌 *model.Ride 讓 JSON 攤平，既有欄位一個不少——App 讀到的形狀只多不變。
 // 單點訂單的 Stops 為 nil（omitempty），不會多出一個空陣列。
