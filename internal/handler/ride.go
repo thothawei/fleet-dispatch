@@ -18,6 +18,7 @@ type RideHandler struct {
 	rides       *service.RideQueryService
 	rideService *service.RideService
 	stops       *service.RideStopService
+	estimate    *service.EstimateService
 }
 
 func NewRideHandler(
@@ -32,6 +33,11 @@ func NewRideHandler(
 // SetStops 注入停靠點服務（供 N7 的到達／跳過標記）；可選。
 func (h *RideHandler) SetStops(stops *service.RideStopService) {
 	h.stops = stops
+}
+
+// SetEstimate 注入車資預估服務（建單前預估，懸而未決 #1）；可選。
+func (h *RideHandler) SetEstimate(estimate *service.EstimateService) {
+	h.estimate = estimate
 }
 
 // stopStatusForErr 停靠點標記的錯誤對應。
@@ -278,6 +284,74 @@ func createStatusForErr(err error) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+// EstimateFare POST /api/customer/rides/estimate — 乘客建單**前**預估車資（懸而未決 #1）。
+// 純唯讀、不建單。目的地座標必填（沒終點無法算路線）；車種選填（寵物車含清潔費）；
+// 多停靠點時起訖由 stops 推導。輸入形狀與 Create 相同（少了 pickup_address／dropoff_address）。
+func (h *RideHandler) EstimateFare(c *gin.Context) {
+	if h.estimate == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "車資預估未啟用"})
+		return
+	}
+	var req struct {
+		PickupLat           float64  `json:"pickup_lat"`
+		PickupLng           float64  `json:"pickup_lng"`
+		DropoffLat          *float64 `json:"dropoff_lat"`
+		DropoffLng          *float64 `json:"dropoff_lng"`
+		RequiredVehicleType string   `json:"required_vehicle_type"`
+		Stops               []struct {
+			Seq            int     `json:"seq"`
+			Kind           string  `json:"kind"`
+			Lat            float64 `json:"lat"`
+			Lng            float64 `json:"lng"`
+			Address        string  `json:"address"`
+			PassengerLabel string  `json:"passenger_label"`
+		} `json:"stops"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	stops := make([]service.StopInput, 0, len(req.Stops))
+	for _, s := range req.Stops {
+		stops = append(stops, service.StopInput{
+			Seq:            s.Seq,
+			Kind:           s.Kind,
+			Lat:            s.Lat,
+			Lng:            s.Lng,
+			Address:        s.Address,
+			PassengerLabel: s.PassengerLabel,
+		})
+	}
+	res, err := h.estimate.Estimate(c.Request.Context(), service.EstimateRequest{
+		PickupLat:           req.PickupLat,
+		PickupLng:           req.PickupLng,
+		DropoffLat:          req.DropoffLat,
+		DropoffLng:          req.DropoffLng,
+		RequiredVehicleType: req.RequiredVehicleType,
+		Stops:               stops,
+	})
+	if err != nil {
+		c.JSON(estimateStatusForErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"distance_m":         res.DistanceM,
+		"duration_sec":       res.DurationSec,
+		"fare_cents":         res.FareCents,
+		"cleaning_fee_cents": res.CleaningFeeCents,
+		"total_cents":        res.TotalCents,
+	})
+}
+
+// estimateStatusForErr 預估錯誤對應 HTTP 狀態碼：服務未就緒回 503，
+// 其餘（座標／車種／停靠點填錯）沿用建單的 400 對應。
+func estimateStatusForErr(err error) int {
+	if errors.Is(err, service.ErrEstimateUnavailable) {
+		return http.StatusServiceUnavailable
+	}
+	return createStatusForErr(err)
 }
 
 // ActiveByCustomer GET /api/customer/rides/active — 乘客當前進行中訂單（App 啟動/重連取 ride_id 用）

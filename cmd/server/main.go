@@ -180,7 +180,8 @@ func main() {
 	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, rideQueryService, cfg.JWTSecret, cfg.JWTExpiryHours)
 	driverHandler.SetEarnings(reportRepo, feeSettings)
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
-	rideHandler.SetStops(rideStopService) // N7：司機標記到達／跳過停靠點
+	rideHandler.SetStops(rideStopService)                                  // N7：司機標記到達／跳過停靠點
+	rideHandler.SetEstimate(service.NewEstimateService(osrm, feeSettings)) // 懸而未決 #1：建單前車資預估
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenService)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 	chatHandler := handler.NewChatHandler(chatService)
@@ -230,6 +231,7 @@ func main() {
 		customerAuthed.Use(middleware.CustomerAuth(cfg.JWTSecret))
 		{
 			customerAuthed.POST("/rides", rideHandler.Create)
+			customerAuthed.POST("/customer/rides/estimate", rideHandler.EstimateFare)
 			customerAuthed.GET("/customer/fees", customerHandler.Fees)
 			customerAuthed.GET("/customer/rides", rideHandler.HistoryByCustomer)
 			customerAuthed.GET("/customer/rides/active", rideHandler.ActiveByCustomer)
