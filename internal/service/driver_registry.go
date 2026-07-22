@@ -87,6 +87,29 @@ func (s *DriverRegistry) SetVehicle(driverID int64, vehicleType, plateNumber str
 	return d, nil
 }
 
+// SetPhone 設定司機聯絡電話（O7）。乘客在「司機前往上車點」階段看得到這個號碼並可直接撥打，
+// 但在此之前 drivers.phone **沒有任何寫入路徑**——註冊不收、車輛設定也不收，
+// 導致乘客端的撥號按鈕實質永遠不出現。
+// 刻意獨立於 SetVehicle：改電話不該觸發車輛重新審核（O5），否則司機換號碼就被鎖出派單池。
+func (s *DriverRegistry) SetPhone(driverID int64, phone string) (*model.Driver, error) {
+	normalized := constants.NormalizePhone(phone)
+	if !constants.IsValidPhone(normalized) {
+		return nil, ErrInvalidPhone
+	}
+	d, err := s.drivers.FindByID(driverID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if err := s.drivers.UpdatePhone(driverID, normalized); err != nil {
+		return nil, err
+	}
+	d.Phone = normalized
+	return d, nil
+}
+
 // GoOnline 顯式上線：設為待命（Idle），重新進入派單池。
 // 載客中（OnTrip）則維持原狀不降級；已停用（Disabled）回 ErrDriverDisabled。
 func (s *DriverRegistry) GoOnline(driverID int64) (*model.Driver, error) {

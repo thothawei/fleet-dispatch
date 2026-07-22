@@ -212,6 +212,16 @@ func (r *DriverRepository) UpdateStatus(id int64, status int16) error {
 // ErrPlateTaken 車牌已掛在別的司機帳號上（uq_drivers_plate_number，O1）。
 var ErrPlateTaken = errors.New("此車牌已被其他司機使用")
 
+// UpdatePhone 更新司機聯絡電話（O7）。呼叫端負責正規化與格式驗證。
+// **刻意不碰 vehicle_review_status**——電話不是車輛屬性，改電話重新送審會讓
+// 司機為了更新一個號碼而被鎖出派單池。
+func (r *DriverRepository) UpdatePhone(id int64, phone string) error {
+	return r.db.Model(&model.Driver{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"phone":      phone,
+		"updated_at": time.Now(),
+	}).Error
+}
+
 // UpdateVehicle 更新司機車輛資訊（O2）。呼叫端負責驗證車種白名單與車牌格式；
 // 值域仍由 DB CHECK 與 partial unique index 兜底。
 // 撞到車牌唯一索引時翻成 ErrPlateTaken，讓 handler 能回 409 而非 500。
@@ -516,9 +526,14 @@ type DailyDriverReport struct {
 	TotalDistanceM int64   `json:"total_distance_m"` // int64 防大量加總溢位（F9-2）
 	AvgPickupSec   float64 `json:"avg_pickup_sec"`
 	// 金額欄位（分）：營業額、手續費、司機實得（F5）。
+	// TotalRevenueCents 營業額＝車資合計，**不含清潔費**（O6）。
 	TotalRevenueCents    int64 `json:"total_revenue_cents"`
 	TotalCommissionCents int64 `json:"total_commission_cents"`
-	DriverNetCents       int64 `json:"driver_net_cents"`
+	// TotalCleaningFeeCents 寵物車清潔費合計（O6）：不計入營業額與抽成，全額歸司機。
+	// DriverNetCents 已含它，少了這個分項，日報表的「營業額 − 手續費」會莫名對不上實得
+	// （月報表 F6 與司機收入頁 F7 早已有此欄，日報表 F5 漏了）。
+	TotalCleaningFeeCents int64 `json:"total_cleaning_fee_cents"`
+	DriverNetCents        int64 `json:"driver_net_cents"`
 }
 
 func (r *ReportRepository) DailyDriverStats(date string) ([]DailyDriverReport, error) {
@@ -534,6 +549,7 @@ func (r *ReportRepository) DailyDriverStats(date string) ([]DailyDriverReport, e
 			COALESCE(AVG(EXTRACT(EPOCH FROM (r.accepted_at - r.requested_at))), 0) AS avg_pickup_sec,
 			COALESCE(SUM(r.fare_amount_cents), 0)::bigint AS total_revenue_cents,
 			COALESCE(SUM(r.commission_amount_cents), 0)::bigint AS total_commission_cents,
+			COALESCE(SUM(r.cleaning_fee_cents), 0)::bigint AS total_cleaning_fee_cents,
 			COALESCE(SUM(r.driver_net_amount_cents), 0)::bigint AS driver_net_cents
 		FROM rides r
 		JOIN drivers d ON d.id = r.driver_id

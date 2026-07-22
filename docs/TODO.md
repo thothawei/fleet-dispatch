@@ -548,9 +548,13 @@
       **空值不帶該鍵**（而非帶空字串）——寧可少一個鍵，也不要讓 App 顯示空白車牌。
       **隱私**：`ride.accepted` 的收件人是 `ride.CustomerID` 一人；查詢類一律先授權再組資料（見 O7）。
 
-- [ ] **O5. admin 呈現／審核（可選）**
-      司機列表顯示車種車牌；是否需要「車輛審核」狀態（pending/approved）待拍板——
-      若需要，O3 的 gate 條件要改成「已審核」而非「有填」。
+- [x] **O5. admin 呈現／審核** ✅ **已實作（2026-07-19，migration `000022`，PR #40）**
+      使用者 2026-07-19 拍板「先做」。O3 的 gate 條件已升級為「**已審核**」而非「有填」
+      （`VehicleApproved()` 取代 `HasVehicle()`，派單側＋接單側）；接單側分
+      `ErrDriverNoVehicle`（沒填）與 `ErrDriverNotApproved`（待審核），司機知道下一步。
+      `UpdateVehicle` **原子地**把 review 重置 pending（改車一律重審）；
+      admin `POST /drivers/:id/vehicle-review`（ops 角色，只有 pending 可審、退回必附原因）。
+      三端同批上線：司機 App 四態路由（fleet-app PR #35）、admin 審核 UI（fleet-frontEnd PR #20）。
 
 - [x] **O6. 寵物用車清潔費** ✅ **已實作（2026-07-17，migration `000019`）**（定案 2026-07-16：比例加收，上限 30%）
 
@@ -829,6 +833,37 @@
    實作時要釘住這個語意。
 
 ---
+
+## 🔧 Q. 下游缺口回補（2026-07-22）
+
+> 起因：盤點三端程式碼（不只看勾選）發現後端有三個洞——兩個讓 admin／App 顯示不出已完成的能力，
+> 一個讓已拍板的功能**實質從未生效**。三項皆已實作並測過。
+
+- [x] **Q1. 日報表補清潔費分項**（`ReportRepository.DailyDriverStats`）
+      月報表（F6）與司機收入（F7）早就有 `total_cleaning_fee_cents`，**日報表 F5 漏了**。
+      少了它，日報表的「營業額 − 手續費」會莫名對不上 `driver_net_cents`——差額正是清潔費，
+      而 admin 只呈現不算錢，看到的就是一組兜不攏的數字。
+      驗收：`TestCleaningFeeReports/日報表分項與等式`（testcontainers 真 Postgres）；
+      **反向確認**拿掉 SQL 那行會 FAIL（實測 `得到 0，預期 3700`）。
+
+- [x] **Q2. admin 訂單詳情帶 stops**（`AdminHandler.RideDetail` ＋ `SetRideStops` 注入）
+      多停靠點行程（N）在後台只看得到由停靠點推導出的單一上車／下車點，中間的乘客完全消失，
+      客服無法回答「這趟載了誰、停了哪幾站、哪站被跳過」。
+      形狀共用 `service.StopViews`（＝司機／乘客端同一份 `stopView`）——三端說法不一致就沒得對帳。
+      **停靠點讀取失敗不擋整個詳情頁**；單點訂單不帶 stops 鍵（不是空陣列）。
+      驗收：`TestAdminRideDetail_帶停靠點`／`_未注入停靠點repo仍可用`；
+      **反向確認**拿掉 main.go 的 `SetRideStops` 接線會 FAIL（比照 N4 踩過的漏接線坑）。
+
+- [x] **Q3. 司機聯絡電話寫入路徑**（`PUT /api/driver/profile`）
+      **O7 拍板「電話明碼、乘客可直接撥打」，但 `drivers.phone` 從來沒有任何寫入路徑**——
+      註冊不收、車輛設定也不收，只能手動改 DB。結果乘客端的 `tel:` 撥號按鈕實質永遠不出現。
+      新增 `DriverRegistry.SetPhone` ＋ `DriverRepository.UpdatePhone`（寬鬆驗證：去分隔符後
+      8–15 位數字，可帶 `+`；不綁「09 開頭」，車隊可能有市話或境外號碼）。
+      **刻意與 `PUT /driver/vehicle` 分開**：電話不是車輛屬性，改電話若重置 O5 審核，
+      司機為了更新一個號碼就會被鎖出派單池。
+      讀取端 `GET /driver/vehicle` 順帶回 `phone`（唯讀便利欄位，設定頁一次讀完省一支往返）。
+      驗收：`TestDriverProfile_*`（授權邊界／參數驗證／`改電話不重置車輛審核` 走真 DB）。
+      App 端對應：司機車輛設定頁加聯絡電話欄（fleet-app 同批）。
 
 ## 下次任務
 

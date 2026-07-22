@@ -103,6 +103,29 @@ func TestCleaningFeeReports(t *testing.T) {
 		}
 	})
 
+	t.Run("日報表分項與等式", func(t *testing.T) {
+		daily, err := reports.DailyDriverStats(billTestDate)
+		if err != nil {
+			t.Fatalf("日報表查詢失敗：%v", err)
+		}
+		if len(daily) != 1 {
+			t.Fatalf("預期 1 位司機，得到 %d", len(daily))
+		}
+		d := daily[0]
+		if d.TotalRevenueCents != wantRevenue {
+			t.Fatalf("日報表營業額不該含清潔費：得到 %d，預期 %d", d.TotalRevenueCents, wantRevenue)
+		}
+		if d.TotalCleaningFeeCents != wantCleaning {
+			t.Fatalf("日報表清潔費分項不符：得到 %d，預期 %d", d.TotalCleaningFeeCents, wantCleaning)
+		}
+		// 日報表與月報表用同一條等式；沒有分項欄時「營業額 − 手續費」會比實得少一截。
+		if got := d.TotalRevenueCents - d.TotalCommissionCents + d.TotalCleaningFeeCents; got != d.DriverNetCents {
+			t.Fatalf("等式失效：營業額 %d − 手續費 %d + 清潔費 %d = %d，但實得為 %d",
+				d.TotalRevenueCents, d.TotalCommissionCents, d.TotalCleaningFeeCents,
+				got, d.DriverNetCents)
+		}
+	})
+
 	t.Run("司機收入分項與等式", func(t *testing.T) {
 		earn, err := reports.DriverMonthlyEarnings(driver.ID, billTestMonth)
 		if err != nil {
