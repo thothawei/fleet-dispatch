@@ -86,7 +86,7 @@ func ratingStatusForErr(err error) int {
 		return http.StatusForbidden
 	case errors.Is(err, service.ErrNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, service.ErrRatingExists), errors.Is(err, service.ErrRideNotCompleted):
+	case errors.Is(err, service.ErrRatingExists), errors.Is(err, service.ErrRideNotRatable):
 		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError

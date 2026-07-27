@@ -75,8 +75,15 @@ func TestRatingFlow(t *testing.T) {
 
 	// 未完成的行程沒有可評的服務
 	activeRide := newTestRide(t, rides, owner.ID, constants.RideStatusPickedUp)
-	if _, err := svc.RateByCustomer(owner.ID, activeRide.ID, 5, ""); !errors.Is(err, ErrRideNotCompleted) {
+	err = func() error { _, e := svc.RateByCustomer(owner.ID, activeRide.ID, 5, ""); return e }()
+	if !errors.Is(err, ErrRideNotRatable) {
 		t.Fatalf("未完成行程評分應被拒，got %v", err)
+	}
+	// **文案也要驗**：錯誤訊息會原樣顯示在乘客的評分對話框上。
+	// 只斷言 errors.Is 的話，重用了遺失物的 ErrRideNotCompleted（文案是
+	// 「僅已完成的行程可申請遺失物協尋」）照樣會綠——2026-07-27 實跑才抓到。
+	if strings.Contains(err.Error(), "遺失物") {
+		t.Fatalf("評分的錯誤訊息不該提到遺失物協尋：%q", err.Error())
 	}
 
 	// 主流程：評論前後空白會被 trim
