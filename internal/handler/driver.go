@@ -21,8 +21,15 @@ type DriverHandler struct {
 	rides          *service.RideQueryService
 	reports        *repository.ReportRepository
 	feeSettings    *service.FeeSettings
+	rating         *service.RatingService
 	jwtSecret      string
 	jwtExpiryHours int
+}
+
+// SetRating 注入評分服務（司機在 /driver/me 看自己的平均分，B5）；可選——
+// 未注入時 /driver/me 不帶 rating 欄位，其餘欄位一個不少。
+func (h *DriverHandler) SetRating(rating *service.RatingService) {
+	h.rating = rating
 }
 
 // SetEarnings 注入收入查詢所需的報表 repo 與費率設定（供 /driver/earnings）；可選。
@@ -65,7 +72,16 @@ func (h *DriverHandler) Me(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "找不到司機"})
 		return
 	}
-	c.JSON(http.StatusOK, driverPublic(d))
+	body := driverPublic(d)
+	// 評分彙總（B5）：司機看得到自己被評幾分。**查失敗不擋 /me**——
+	// 這是加值資訊，讓司機因為它而載不出首頁是本末倒置。
+	if h.rating != nil {
+		if summary, err := h.rating.SummaryByDriver(driverID); err == nil {
+			body["rating_avg"] = summary.Average
+			body["rating_count"] = summary.Count
+		}
+	}
+	c.JSON(http.StatusOK, body)
 }
 
 // UpdateProfile PUT /api/driver/profile — 司機自己的聯絡資料（目前只有電話，O7）。

@@ -75,6 +75,7 @@ func main() {
 	rideMessageRepo := repository.NewRideMessageRepository(db)
 	rideStopRepo := repository.NewRideStopRepository(db)
 	lostItemRepo := repository.NewLostItemRepository(db)
+	rideRatingRepo := repository.NewRideRatingRepository(db)
 
 	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
 	if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
@@ -159,8 +160,10 @@ func main() {
 	trackingService.SetStops(rideStopRepo) // N5：多停靠點行程改用全程多點路線計費
 	driverRegistry := service.NewDriverRegistry(driverRepo)
 	rideQueryService := service.NewRideQueryService(trackRepo, rideRepo)
-	rideQueryService.SetDrivers(driverRepo) // O4／O7：乘客查自己訂單時附司機姓名／電話
-	rideQueryService.SetStops(rideStopRepo) // N6：司機端 active 帶全程停靠點
+	rideQueryService.SetDrivers(driverRepo)     // O4／O7：乘客查自己訂單時附司機姓名／電話
+	rideQueryService.SetStops(rideStopRepo)     // N6：司機端 active 帶全程停靠點
+	rideQueryService.SetRatings(rideRatingRepo) // B5：乘客查自己訂單時帶回已給過的評分
+	ratingService := service.NewRatingService(rideRepo, rideRatingRepo)
 	rideStopService := service.NewRideStopService(rideRepo, rideStopRepo)
 	rideStopService.SetPublisher(hub) // N7：到站／跳過即時推給乘客（行程進度）
 	chatService := service.NewChatService(rideRepo, rideMessageRepo, hub)
@@ -179,9 +182,11 @@ func main() {
 	lineHandler := handler.NewLineWebhookHandler(rideService, dispatchService, driverRepo, lineClient)
 	driverHandler := handler.NewDriverHandler(trackingService, driverRegistry, rideQueryService, cfg.JWTSecret, cfg.JWTExpiryHours)
 	driverHandler.SetEarnings(reportRepo, feeSettings)
+	driverHandler.SetRating(ratingService) // B5：/driver/me 帶司機自己的平均分
 	rideHandler := handler.NewRideHandler(dispatchService, trackingService, rideQueryService, rideService)
 	rideHandler.SetStops(rideStopService)                                  // N7：司機標記到達／跳過停靠點
 	rideHandler.SetEstimate(service.NewEstimateService(osrm, feeSettings)) // 懸而未決 #1：建單前車資預估
+	rideHandler.SetRating(ratingService)                                   // B5：乘客評分司機
 	deviceTokenHandler := handler.NewDeviceTokenHandler(deviceTokenService)
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 	chatHandler := handler.NewChatHandler(chatService)
@@ -237,6 +242,8 @@ func main() {
 			customerAuthed.GET("/customer/rides/active", rideHandler.ActiveByCustomer)
 			customerAuthed.GET("/customer/rides/:id", rideHandler.GetByCustomer)
 			customerAuthed.POST("/rides/:id/cancel-by-customer", rideHandler.CancelByCustomer)
+			// B5：乘客對已完成行程評分司機（一趟一評）
+			customerAuthed.POST("/customer/rides/:id/rating", rideHandler.RateByCustomer)
 			customerAuthed.POST("/customer/device-token", deviceTokenHandler.RegisterByCustomer)
 			customerAuthed.DELETE("/customer/device-token", deviceTokenHandler.UnregisterByCustomer)
 			// 遺失物協尋：對已完成行程建單、查自己的協尋、支付處理費

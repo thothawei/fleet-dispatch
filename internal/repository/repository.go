@@ -903,6 +903,9 @@ type CustomerRideRow struct {
 	FareAmountCents *int64     `json:"fare_amount_cents"`
 	DriverID        *int64     `json:"driver_id"`
 	DriverName      *string    `json:"driver_name"`
+	// RatingScore 乘客給過的星等（B5）；**nil ＝尚未評分**，前端據此在歷史清單
+	// 給「評分」入口而非只顯示星星。完成卡關掉後，這裡是唯一的補評路徑。
+	RatingScore *int16 `json:"rating_score"`
 }
 
 const CustomerRideListDefaultLimit = 20
@@ -920,8 +923,11 @@ func (r *RideRepository) ListRecentByCustomer(customerID int64, limit int) ([]Cu
 	err := r.db.Model(&model.Ride{}).
 		Select("rides.id", "rides.status", "rides.pickup_address", "rides.dropoff_address",
 			"rides.requested_at", "rides.completed_at", "rides.fare_amount_cents",
-			"rides.driver_id", "drivers.name AS driver_name").
+			"rides.driver_id", "drivers.name AS driver_name",
+			"ride_ratings.score AS rating_score").
 		Joins("LEFT JOIN drivers ON drivers.id = rides.driver_id").
+		// 一趟至多一則評分（uq_ride_ratings_ride_id），故 LEFT JOIN 不會讓行程重複出現。
+		Joins("LEFT JOIN ride_ratings ON ride_ratings.ride_id = rides.id").
 		Where("rides.customer_id = ?", customerID).
 		Order("rides.id DESC").Limit(limit).
 		Scan(&rows).Error

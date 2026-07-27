@@ -292,6 +292,22 @@ func (LostItemRequest) TableName() string {
 	return "lost_item_requests"
 }
 
+// RideRating 乘客對已完成行程的司機評分（B5）：一趟一則，1–5 星＋選填評論。
+// customer_id／driver_id 為寫入當下的快照，不靠 rides 反查（見 migration 000023 說明）。
+type RideRating struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	RideID     int64     `gorm:"column:ride_id;not null" json:"ride_id"`
+	CustomerID int64     `gorm:"column:customer_id;not null" json:"customer_id"`
+	DriverID   int64     `gorm:"column:driver_id;not null" json:"driver_id"`
+	Score      int16     `gorm:"not null" json:"score"`
+	Comment    string    `gorm:"not null;default:''" json:"comment"`
+	CreatedAt  time.Time `gorm:"not null" json:"created_at"`
+}
+
+func (RideRating) TableName() string {
+	return "ride_ratings"
+}
+
 type Admin struct {
 	ID           int64     `gorm:"primaryKey"`
 	Username     string    `gorm:"column:username;uniqueIndex;not null"`

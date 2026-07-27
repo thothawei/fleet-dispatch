@@ -253,6 +253,7 @@ type RideQueryService struct {
 	rides   *repository.RideRepository
 	drivers *repository.DriverRepository
 	stops   *repository.RideStopRepository
+	ratings *repository.RideRatingRepository
 }
 
 func NewRideQueryService(tracks *repository.TrackRepository, rides *repository.RideRepository) *RideQueryService {
@@ -272,6 +273,12 @@ func (s *RideQueryService) SetDrivers(drivers *repository.DriverRepository) {
 	s.drivers = drivers
 }
 
+// SetRatings 注入評分 repo（乘客查單筆訂單時帶回自己給過的評分，B5）；可選——
+// 未注入時查詢仍可用，只是不帶 rating（App 端等同「尚未評分」，會顯示評分入口）。
+func (s *RideQueryService) SetRatings(ratings *repository.RideRatingRepository) {
+	s.ratings = ratings
+}
+
 // CustomerRideView 乘客視角的訂單：ride 全欄位（含 O7 車輛快照）＋司機姓名／電話。
 //
 // 內嵌 *model.Ride 讓 JSON 攤平，既有欄位一個不少——App 讀到的形狀只多不變。
@@ -289,6 +296,10 @@ type CustomerRideView struct {
 	// 走到哪一站——形狀與司機端的 DriverRideView.Stops **完全相同**，
 	// App 端兩邊共用同一套解析。單點訂單為 nil（omitempty），既有形狀不變。
 	Stops []map[string]any `json:"stops,omitempty"`
+	// Rating 乘客自己對這趟給過的評分（B5）；**尚未評分時為 nil**（omitempty）。
+	// App 端據此決定完成／歷史畫面顯示「留下評分」按鈕還是既有星等，
+	// 不必再打一支「評過沒」的查詢。
+	Rating *model.RideRating `json:"rating,omitempty"`
 }
 
 // withDriverContact 補上司機姓名／電話；未接單或未注入 drivers 時原樣回傳。
@@ -309,17 +320,27 @@ func (s *RideQueryService) withDriverContact(ride *model.Ride) *CustomerRideView
 	return view
 }
 
-// customerRideView 乘客視角的完整訂單：司機聯絡資訊 ＋ 全程停靠點。
+// customerRideView 乘客視角的完整訂單：司機聯絡資訊 ＋ 全程停靠點 ＋ 自己給過的評分。
 //
-// 停靠點讀失敗**不擋**整筆查詢——乘客仍能看到行程狀態與司機資訊，
-// 這與司機端 GetActiveRideByDriver 的處理一致（stops 是加值資訊，不是行程本體）。
+// 停靠點與評分讀失敗**都不擋**整筆查詢——乘客仍能看到行程狀態與司機資訊，
+// 這與司機端 GetActiveRideByDriver 的處理一致（兩者都是加值資訊，不是行程本體）。
 func (s *RideQueryService) customerRideView(ride *model.Ride) *CustomerRideView {
 	view := s.withDriverContact(ride)
-	if view == nil || s.stops == nil {
+	if view == nil {
 		return view
 	}
-	if stops, err := s.stops.ListByRide(ride.ID); err == nil {
-		view.Stops = stopViews(stops)
+	if s.stops != nil {
+		if stops, err := s.stops.ListByRide(ride.ID); err == nil {
+			view.Stops = stopViews(stops)
+		}
+	}
+	// 評分只存在於已完成的行程（RateByCustomer 的守門），所以**只在完成時才查**——
+	// 這條路徑也服務乘客端的 active 輪詢，對永遠不可能有評分的進行中訂單
+	// 每幾秒打一次 ride_ratings 是純浪費。
+	if s.ratings != nil && ride.Status == constants.RideStatusCompleted {
+		if rating, err := s.ratings.FindByRide(ride.ID); err == nil {
+			view.Rating = rating
+		}
 	}
 	return view
 }
