@@ -964,6 +964,32 @@
 部署到本機 docker compose 後**實打複驗**：評分回「僅已完成的行程可以評分」、
 遺失物端點仍回原本的文案。
 
+### ⭐ admin 評分可見性（2026-07-27）
+
+> B5 上線後評分**只有司機自己看得到**，admin 端 `grep -i rating` 零命中——
+> 營運方看不到任何司機的評價。這與 B5 當初替司機補上「服務評價」是**同一個問題的上一層**：
+> 資料寫進去了，但該用它做決策的人看不到。
+
+- [x] **`RideRatingRepository.SummaryByDrivers`** ✅ 2026-07-27
+      一條 `GROUP BY` 取代逐列查詢——司機列表動輒數十列，每列各打一次 `SummaryByDriver`
+      就是 N+1。回傳的 map **只含有評分的司機**，沒評分者由呼叫端以零值呈現。
+- [x] **`GET /admin/drivers` 帶 `rating_avg`／`rating_count`** ✅ 2026-07-27
+      改回 `adminDriverView`（內嵌 `*model.Driver` 讓 JSON 攤平，既有欄位一個不少）。
+      **沒評分的司機一律回 `(0, 0)` 而非省略欄位**：前端據 `rating_count` 判斷要顯示
+      「尚無評分」還是分數，缺鍵會讓它多判一種 undefined。
+      評分查失敗**不擋司機列表**——那是營運每天在用的主畫面。
+- [x] **`GET /admin/rides/:id` 帶 `rating`** ✅ 2026-07-27
+      未評分時**整個鍵不出現**（與乘客端 `CustomerRideView.rating` 同一約定）；
+      讀取失敗同樣不擋詳情頁。
+- 注入走可選的 `SetRatings`，未注入時兩處回應形狀不變。
+
+**驗收**：`go build`／`vet`／`gofmt` 乾淨；新增 `TestRatingSummaryByDrivers`（真 PostGIS，
+含「沒評分的司機不出現在 map 裡」「批次結果與逐列一致」「空清單不爆」）。
+**docker compose 實打**：司機 1 `rating_avg=4.5 rating_count=2`（(5+4)/2）、司機 2 `(0, 0)`；
+`/admin/rides/1` 帶評論、`/admin/rides/2` 空評論、`/admin/rides/3`（未評分）**無 `rating` 鍵**。
+
+admin 端對應：fleet-frontEnd PR #22（司機管理頁評價欄、訂單詳情評分卡）。
+
 ## 下次任務
 
 **新需求（2026-07-16 加入，尚未實作，皆需後端地基先行）**：

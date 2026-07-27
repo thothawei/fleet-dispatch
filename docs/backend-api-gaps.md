@@ -94,7 +94,7 @@
 | 15 | POST | `/api/customer/rides/estimate` | customer JWT | ✅ 2026-07-23（R；`EstimateService`，與完成計費共用 `FeeSettings.Quote`） |
 | 16 | POST | `/api/customer/rides/:id/rating` | customer JWT | ✅ 2026-07-27（S；1–5 星＋評論，**一趟一評**。讀回：`CustomerRideView.rating`／歷史列 `rating_score`／`/driver/me` 的 `rating_avg`） |
 | 17 | GET | `/api/customer/rides` | customer JWT | ✅ 2026-07-19（H；`ListRecentByCustomer`，新到舊、只回本人） |
-| 18 | GET | `/api/driver/rides` | driver JWT | 司機歷史/收入列表 |
+| 18 | GET | `/api/driver/rides` | driver JWT | 司機歷史/收入列表（部分由 `GET /api/driver/earnings` 涵蓋，F7） |
 | 19 | POST | `/api/rides/:id/payment` | customer JWT | 金流請款（預授權→行程後扣款） |
 | 20 | GET | `/metrics` | 內網/無 | Prometheus 指標（派單成功率、接單耗時、在線司機數、API 延遲） |
 

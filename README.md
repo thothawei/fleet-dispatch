@@ -81,6 +81,8 @@ docker compose --profile simulator up -d simulator
 | GET  | `/api/driver/earnings?month=YYYY-MM` | 司機收入（趟數/營業額/手續費/實得/會費/應付總公司） |
 | GET/POST | `/api/rides/:id/messages?after=` | 行程內對話：歷史／發話（僅本趟乘客/司機；即時遞送走 WS `chat.message`） |
 | POST | `/api/rides/:id/lost-items` | 乘客對已完成行程建遺失物協尋單（處理費＝車資×%，建單快照） |
+| POST | `/api/customer/rides/estimate` | 建單**前**車資預估（純唯讀，與完成計費共用同一套費率，R） |
+| POST | `/api/customer/rides/:id/rating` | 乘客評分司機 1–5 星＋評論，**一趟一評**（B5） |
 | GET  | `/api/rides/:id/lost-items` | 查該行程最新協尋單（本趟乘客/司機/admin） |
 | GET  | `/api/customer/lost-items`、`/api/driver/lost-items` | 乘客／司機的未結案協尋清單 |
 | POST | `/api/lost-items/:id/found` `pay` `return` `close` | 協尋狀態機：司機尋獲→乘客付處理費→司機歸還；未尋獲可結案 |
@@ -92,8 +94,9 @@ docker compose --profile simulator up -d simulator
 |------|------|------|
 | POST | `/api/admin/login` | 後台登入（種子 admin/admin） |
 | GET  | `/api/admin/rides?status=&limit=&offset=&from=&to=&q=` | 訂單列表（伺服器端分頁，回 `total`） |
-| GET/POST | `/api/admin/rides/:id`、`/api/admin/rides/:id/cancel` | 訂單詳情（軌跡+事件）／強制取消 |
-| GET/PATCH | `/api/admin/drivers`、`/api/admin/drivers/:id/status` | 司機列表／啟停 |
+| GET/POST | `/api/admin/rides/:id`、`/api/admin/rides/:id/cancel` | 訂單詳情（軌跡＋事件＋停靠點＋乘客評分）／強制取消 |
+| GET/PATCH | `/api/admin/drivers`、`/api/admin/drivers/:id/status` | 司機列表（含 `rating_avg`／`rating_count`）／啟停 |
+| POST | `/api/admin/drivers/:id/vehicle-review` | 車輛審核：核准／退回（退回須附原因，O5） |
 | GET  | `/api/admin/reports/daily?date=`、`/reports/monthly?month=` | 日／月報表（含金額） |
 | GET/PUT | `/api/admin/settings/dispatch`、`/api/admin/settings/fees` | 派單參數／費率設定（費率限 superadmin） |
 | GET/POST/PATCH | `/api/admin/membership-invoices[...]` | 會費帳單：列表／產生／標記已繳 |
@@ -147,30 +150,25 @@ Redis 鍵：`drivers:geo`（GEO 位置集合）、`driver:{id}:loc`（最新位�
 
 ## 規劃中（尚未實作）
 
-> 2026-07-16 加入的需求，**都還沒實作**。完整規格、施作項目與待拍板事項見
-> [docs/TODO.md](docs/TODO.md) 的 **N**（多乘客／多停靠點）與 **O**（車輛資訊／寵物車清潔費）章節——
-> 本後端是這兩項的**跨端主規格**，App 與 admin 依賴這裡先行。
+> **2026-07-16 加入的 N／O／P 與寵物車清潔費、司機聯絡方式已全數實作並合併進 main**
+> （PR #35–#43），本段先前寫「都還沒實作」是過期資訊，**2026-07-27 修正**。
+> 各章完整規格與驗收紀錄見 [docs/TODO.md](docs/TODO.md)。
 
-- **N. 多乘客／多停靠點行程**：一張訂單最多 **5 位乘客各自上下車**（最多 10 個停靠點）。
-  現行 `rides` 是**單點對單點**（`pickup_point` ＋單一 `dropoff_point`）→ **必須新建 `ride_stops` 表**。
-  **車資已拍板：全程實際路線（起點→各停靠點→最終目的地，含繞路）**——
-  需擴充 OSRM client 支援多 waypoint（現行 `RouteDuration` 介面寫死兩點），
-  且 `fallbackETA` 的 haversine 退路要逐段累加，否則 OSRM 掛掉時會退化成直達距離、低估車資。
-- **O. 司機車輛資訊**：`drivers` 加車種（選單：轎車／休旅／七人座／無障礙／寵物用車）＋車牌；
-  **無車輛資料不得被派單／接單**（`dispatch.go` 候選過濾 ＋ accept 擋下；不設寬限期）。
-  **gate 必須在後端**——API 可被直接呼叫，只擋 App 無效。
-  `rides` 另落**車輛快照**，否則司機換車後歷史行程查不到當時的車。
-- **P. 乘客指定車種**：叫車時可指定車種（`rides.required_vehicle_type`），
-  `dispatch.go` 候選司機依車種過濾（現行只看 `status`，完全不管車種）。
-  不只服務寵物車——無障礙／七人座同樣是「乘客有需求才要」的車種。
-  指定車種會讓可用司機大幅變少 → 更常走到「無人接單自動取消」，取消原因要說清楚是車種問題。
-- **寵物用車清潔費**：`fleet_settings` 加 `pet_cleaning_fee_bps`，**上限 30%（DB CHECK ≤ 3000）**；
-  完成時定格 `rides.cleaning_fee_cents`（比照費率快照制）。
-  **加收依「乘客指定的車種」（`required_vehicle_type == 'pet'`），不是依司機車種**——
-  乘客沒指定寵物車卻剛好被派到寵物車時不得加收。
-  **待拍板**：清潔費是否計入抽成與營業額、找不到指定車種是否降級改派一般車。
-- **司機聯絡方式／留言板**：`drivers.phone` 欄位**已存在**，缺的是填寫入口與「僅該趟乘客可見」的開放；
-  留言板**沿用既有 H1 `ride_messages`**（已有 REST 歷史＋WS 即時），不另建一套。
+剩下的多屬**量體上升後才需要**或**待產品／外部資源**，勿過早做：
+
+- **P4 #19 付款金流**：完成後付款仍是佔位（遺失物處理費目前也是記帳式確認，無真金流）。
+  需先定金流方案，屬產品決策。
+- **P4 #20 `/metrics`**：Prometheus 指標（派單成功率、接單耗時、在線司機數、API 延遲）。
+- **P4 #18 `/api/driver/rides`**：司機歷史列表；收入面已由 `GET /api/driver/earnings`（F7）涵蓋，
+  缺的是逐趟明細。
+- **F9-7 `rides` 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
+- **`drivers`／`membership_invoices` 真分頁**：逼近 `MaxListRows=5000` 時比照 `rides` 改
+  offset/keyset 伺服器端分頁（含前端）。
+- **聊天訊息 FCM 推播**：App 被殺時收不到 `chat.message`（派單推播 A2 已實作）。
+- **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加
+  「後台手動校正單筆車資」待產品定。
+- **評分的營運動作**（B5 下游）：目前三端都只「看得到」評分，**沒有低分司機的處理流程**
+  （通知／停權／申訴）。等實際累積評分、營運說得出要做什麼再開——做在前面只會做出沒人用的流程。
 
 ---
 
