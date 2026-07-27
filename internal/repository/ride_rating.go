@@ -67,3 +67,32 @@ func (r *RideRatingRepository) SummaryByDriver(driverID int64) (DriverRatingSumm
 	}
 	return summary, nil
 }
+
+// SummaryByDrivers 一次取多位司機的評分彙總（後台司機列表用）。
+//
+// **一條 GROUP BY 取代逐列查詢**：司機列表動輒數十列，每列各打一次
+// SummaryByDriver 就是 N+1。回傳的 map 只含**有評分的**司機，
+// 沒評分的司機呼叫端自行以零值呈現（「尚無評分」不是缺資料，是常態）。
+func (r *RideRatingRepository) SummaryByDrivers(driverIDs []int64) (map[int64]DriverRatingSummary, error) {
+	out := make(map[int64]DriverRatingSummary, len(driverIDs))
+	if len(driverIDs) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		DriverID int64
+		Avg      float64
+		Count    int64
+	}
+	err := r.db.Model(&model.RideRating{}).
+		Select("driver_id", "AVG(score) AS avg", "COUNT(*) AS count").
+		Where("driver_id IN ?", driverIDs).
+		Group("driver_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.DriverID] = DriverRatingSummary{Average: row.Avg, Count: row.Count}
+	}
+	return out, nil
+}

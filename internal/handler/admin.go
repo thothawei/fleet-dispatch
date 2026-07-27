@@ -36,9 +36,16 @@ type AdminHandler struct {
 	membershipInvoices *repository.MembershipInvoiceRepository
 	lostItems          *repository.LostItemRepository
 	rideStops          *repository.RideStopRepository
+	ratings            *repository.RideRatingRepository
 	redis              *redisstore.Store
 	jwtSecret          string
 	jwtExpiryHours     int
+}
+
+// SetRatings 注入評分 repo（司機列表的評價欄、訂單詳情的該趟評分）；可選——
+// 未注入時兩處都不帶 rating 欄位，既有回應形狀一個欄位不少。
+func (h *AdminHandler) SetRatings(ratings *repository.RideRatingRepository) {
+	h.ratings = ratings
 }
 
 // SetFeeSettings 注入費率設定服務（供 /settings/fees 讀寫）；可選。
@@ -134,13 +141,44 @@ func (h *AdminHandler) Fleet(c *gin.Context) {
 }
 
 // Drivers GET /api/admin/drivers：司機列表
+// adminDriverView 後台司機列表的單列：司機全欄位 ＋ 評價彙總（B5）。
+//
+// 內嵌 *model.Driver 讓 JSON 攤平，既有欄位一個不少——前端讀到的形狀只多不變。
+// **沒評分的司機一律回 (0, 0) 而不是省略欄位**：前端據 rating_count 判斷要顯示
+// 「尚無評分」還是分數，缺鍵會讓它得多判一種 undefined。
+type adminDriverView struct {
+	*model.Driver
+	RatingAvg   float64 `json:"rating_avg"`
+	RatingCount int64   `json:"rating_count"`
+}
+
 func (h *AdminHandler) Drivers(c *gin.Context) {
 	drivers, err := h.drivers.ListAll()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"drivers": drivers})
+	if h.ratings == nil {
+		c.JSON(http.StatusOK, gin.H{"drivers": drivers})
+		return
+	}
+	ids := make([]int64, 0, len(drivers))
+	for i := range drivers {
+		ids = append(ids, drivers[i].ID)
+	}
+	// 評分查失敗**不擋司機列表**——那是營運每天在用的主畫面，
+	// 不該因為加值欄位取不到就整頁壞掉（比照 /driver/me 的處理）。
+	summaries, err := h.ratings.SummaryByDrivers(ids)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"drivers": drivers})
+		return
+	}
+	views := make([]adminDriverView, 0, len(drivers))
+	for i := range drivers {
+		s := summaries[drivers[i].ID] // 沒評分者為零值
+		views = append(views, adminDriverView{Driver: &drivers[i], RatingAvg: s.Average, RatingCount: s.Count})
+	}
+	c.JSON(http.StatusOK, gin.H{"drivers": views})
 }
 
 const rideListDateLayout = "2006-01-02"
@@ -285,6 +323,14 @@ func (h *AdminHandler) RideDetail(c *gin.Context) {
 			if views := service.StopViews(stops); views != nil {
 				resp["stops"] = views
 			}
+		}
+	}
+	// 該趟的乘客評分（B5）：客服要能回答「這位乘客給了幾分、寫了什麼」。
+	// **未評分時整個鍵不出現**（與乘客端 CustomerRideView.rating 同一約定），
+	// 讀取失敗同樣不擋詳情頁。
+	if h.ratings != nil {
+		if rating, err := h.ratings.FindByRide(id); err == nil && rating != nil {
+			resp["rating"] = rating
 		}
 	}
 	c.JSON(http.StatusOK, resp)

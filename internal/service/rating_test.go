@@ -214,3 +214,67 @@ func TestCustomerRideViewCarriesRating(t *testing.T) {
 		t.Fatalf("歷史列表沒有這趟行程（%d）", rideID)
 	}
 }
+
+// TestRatingSummaryByDrivers 批次彙總（後台司機列表用）：一條 GROUP BY 取代 N+1。
+// **沒評分的司機不出現在 map 裡**，呼叫端以零值呈現「尚無評分」。
+func TestRatingSummaryByDrivers(t *testing.T) {
+	db := newServiceTestDB(t)
+	customers := repository.NewCustomerRepository(db)
+	drivers := repository.NewDriverRepository(db)
+	rides := repository.NewRideRepository(db)
+	ratings := repository.NewRideRatingRepository(db)
+
+	owner, err := customers.FindOrCreateByLineUserID("U_batch_owner", "評分乘客")
+	if err != nil {
+		t.Fatalf("建立乘客失敗：%v", err)
+	}
+	d1, err := drivers.FindOrCreate("U_batch_d1", "司機一")
+	if err != nil {
+		t.Fatalf("建立司機失敗：%v", err)
+	}
+	d2, err := drivers.FindOrCreate("U_batch_d2", "司機二")
+	if err != nil {
+		t.Fatalf("建立司機失敗：%v", err)
+	}
+	d3, err := drivers.FindOrCreate("U_batch_d3", "沒被評過的司機")
+	if err != nil {
+		t.Fatalf("建立司機失敗：%v", err)
+	}
+
+	svc := NewRatingService(rides, ratings)
+	// 司機一：5 與 3 → 平均 4；司機二：2 → 平均 2；司機三：無評分
+	for _, tc := range []struct {
+		driverID int64
+		score    int
+	}{{d1.ID, 5}, {d1.ID, 3}, {d2.ID, 2}} {
+		rideID := completedRideForRating(t, rides, owner.ID, tc.driverID)
+		if _, err := svc.RateByCustomer(owner.ID, rideID, tc.score, ""); err != nil {
+			t.Fatalf("評分失敗：%v", err)
+		}
+	}
+
+	got, err := ratings.SummaryByDrivers([]int64{d1.ID, d2.ID, d3.ID})
+	if err != nil {
+		t.Fatalf("批次彙總失敗：%v", err)
+	}
+	if s := got[d1.ID]; s.Count != 2 || s.Average != 4 {
+		t.Fatalf("司機一應為 4 分／2 則，得到 %+v", s)
+	}
+	if s := got[d2.ID]; s.Count != 1 || s.Average != 2 {
+		t.Fatalf("司機二應為 2 分／1 則，得到 %+v", s)
+	}
+	if _, ok := got[d3.ID]; ok {
+		t.Fatalf("沒評分的司機不該出現在 map 裡（呼叫端以零值呈現「尚無評分」）")
+	}
+	// 與逐列查詢一致——批次是為了效能，不是為了不同的答案
+	single, err := svc.SummaryByDriver(d1.ID)
+	if err != nil || single.Average != got[d1.ID].Average || single.Count != got[d1.ID].Count {
+		t.Fatalf("批次與逐列結果不一致：%+v vs %+v（err=%v）", got[d1.ID], single, err)
+	}
+
+	// 空清單不該打 DB，也不該爆
+	empty, err := ratings.SummaryByDrivers(nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("空清單應回空 map，得到 %+v（err=%v）", empty, err)
+	}
+}

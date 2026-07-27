@@ -210,6 +210,7 @@ func main() {
 	adminHandler.SetMembershipInvoices(membershipInvoiceRepo)
 	adminHandler.SetLostItems(lostItemRepo)
 	adminHandler.SetRideStops(rideStopRepo)
+	adminHandler.SetRatings(rideRatingRepo) // B5：司機列表評價欄＋訂單詳情該趟評分
 
 	// 乘客認證：註冊/登入（line_user_id + 密碼 JWT）
 	customerRegistry := service.NewCustomerRegistry(customerRepo)
