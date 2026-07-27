@@ -896,6 +896,45 @@
         App 建單 ride #24（429m）完成卡「車資 NT$94」＝ 同座標預估 NT$94。
         繞路時走 N5 既有 `max(軌跡, 路線)`，故「實際依行駛路線可能不同」的免責成立。
 
+## ⭐ S. 乘客評分司機（B5，2026-07-27）
+
+> App 端 B5 從 2026-07-08 起就在完成卡放著 disabled 的「留下評分（即將開放）」佔位，
+> 標註「真實 API 待 Phase C」——這是全 App **最後一個**還印著「即將開放」的功能。
+> 後端從無評分資料表與端點（`grep -i rating` 全 repo 零命中），本批補齊。
+> 對應 [backend-api-gaps.md](backend-api-gaps.md) P4 #16。
+
+- [x] **migration 000023 `ride_ratings`** ✅ 2026-07-27
+      `ride_id`（FK rides，ON DELETE CASCADE）／`customer_id`／`driver_id`／`score`／`comment`／`created_at`。
+      - **一趟一評、不可重評**（唯一索引 `uq_ride_ratings_ride_id`）：分數送出即定論。
+        允許改分會讓司機平均分變成可被事後情緒左右的浮動值，也讓「評過沒」失去明確答案
+        （App 完成卡要據此決定顯示星星還是評分按鈕）。
+      - `customer_id`／`driver_id` 是**寫入當下的快照**，不靠 rides 反查——評分屬於
+        「這位乘客給這位司機」的事實，行程資料日後若調整不該改寫歷史評分。
+      - CHECK：`score BETWEEN 1 AND 5`、`char_length(comment) <= 500`（服務層另有 200 字上限，
+        DB 這層是直打 SQL 也擋得住的最後防線，比照 `lost_item_requests`）。
+- [x] **`POST /api/customer/rides/:id/rating`（customer JWT）** ✅ 2026-07-27
+      `service.RatingService.RateByCustomer` 驗證順序刻意是「輸入 → 歸屬 → 狀態 → 重複」：
+      先擋不必查 DB 的輸入錯誤，再依序回答「這趟是不是你的」「完成了沒」「你評過了沒」。
+      - 錯誤對應：星等越界／評論過長 → 400；非本人 → **403**（訂單存在，只是不是你的）；
+        不存在 → 404；**已評過／行程未完成 → 409**（狀態衝突而非輸入格式錯，
+        App 據此知道不必請乘客改參數重送）。
+      - 沒司機的行程（派單前取消）沒有評分對象，與「未完成」同走 `ErrRideNotCompleted`。
+- [x] **讀回路徑**（沒有讀回，App 無從知道評過沒）✅ 2026-07-27
+      - `CustomerRideView` 加 `rating`（`GET /customer/rides/:id`／`active`）；**未評分時整個鍵不出現**。
+        （App 目前從歷史列表的 `rating_score` 判斷評過沒；這個欄位供訂單詳情路徑使用。）
+      - `CustomerRideRow` 加 `rating_score`（`GET /customer/rides` 歷史列表，LEFT JOIN
+        `ride_ratings`；一趟至多一則故不會讓行程重複出現）——**完成卡關掉後這是唯一的補評路徑**。
+      - `GET /api/driver/me` 加 `rating_avg`／`rating_count`，司機看得到自己被評幾分。
+        **查失敗不擋 /me**（加值資訊，不該讓司機因此載不出首頁）；新司機無評分回 (0, 0) 而非錯誤。
+      - 三處注入都是可選的 `SetRating`／`SetRatings`，未注入時既有回應形狀一個欄位不少。
+- [x] **驗收** ✅ 2026-07-27：`go build ./...`＋`go vet ./...` 乾淨；
+      `internal/service/rating_test.go` 3 案（主流程＋四道守門與 trim／平均分含無評分 (0,0)／
+      訂單視圖與歷史列表讀回，真 PostGIS 跑全部 migration，順帶驗證 000023 本身可套用）＋
+      `internal/handler/rating_test.go` 2 案（401／403／壞 id 400／壞 JSON 400／
+      星等越界含**缺 score 等同 0 也擋**／未啟用 503）。
+- App 端對應（fleet-app 同批）：完成卡「留下評分」開 1–5 星＋評論的 bottom sheet；
+  歷史清單未評給「評分」、已評顯示星等；司機收入頁顯示「服務評價 4.5 ／ 5.0（12 則）」。
+
 ## 下次任務
 
 **新需求（2026-07-16 加入，尚未實作，皆需後端地基先行）**：

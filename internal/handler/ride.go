@@ -19,6 +19,7 @@ type RideHandler struct {
 	rideService *service.RideService
 	stops       *service.RideStopService
 	estimate    *service.EstimateService
+	rating      *service.RatingService
 }
 
 func NewRideHandler(
@@ -38,6 +39,58 @@ func (h *RideHandler) SetStops(stops *service.RideStopService) {
 // SetEstimate 注入車資預估服務（建單前預估，懸而未決 #1）；可選。
 func (h *RideHandler) SetEstimate(estimate *service.EstimateService) {
 	h.estimate = estimate
+}
+
+// SetRating 注入評分服務（B5 乘客評分司機）；可選。
+func (h *RideHandler) SetRating(rating *service.RatingService) {
+	h.rating = rating
+}
+
+// RateByCustomer POST /api/customer/rides/:id/rating — 乘客對已完成行程評分（B5）。
+// 一趟一評、不可重評；星等必填 1–5，評論選填。
+func (h *RideHandler) RateByCustomer(c *gin.Context) {
+	if h.rating == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "評分功能未啟用"})
+		return
+	}
+	rideID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id 格式錯誤"})
+		return
+	}
+	var req struct {
+		Score   int    `json:"score"`
+		Comment string `json:"comment"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
+		return
+	}
+	customerID := middleware.CustomerIDFromCtx(c)
+	rating, err := h.rating.RateByCustomer(customerID, rideID, req.Score, req.Comment)
+	if err != nil {
+		c.JSON(ratingStatusForErr(err), gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"rating": rating})
+}
+
+// ratingStatusForErr 評分錯誤對應 HTTP 狀態碼。
+// 「已評過」與「行程未完成」都是**狀態衝突而非輸入格式錯誤**（409），
+// App 端據此知道不必請乘客改參數重送。
+func ratingStatusForErr(err error) int {
+	switch {
+	case errors.Is(err, service.ErrInvalidScore), errors.Is(err, service.ErrCommentTooLong):
+		return http.StatusBadRequest
+	case errors.Is(err, service.ErrForbidden):
+		return http.StatusForbidden
+	case errors.Is(err, service.ErrNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrRatingExists), errors.Is(err, service.ErrRideNotCompleted):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 // stopStatusForErr 停靠點標記的錯誤對應。
