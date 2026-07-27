@@ -17,6 +17,11 @@ var (
 	ErrRatingExists = errors.New("此行程已評分過")
 	// ErrCommentTooLong 評論字數超過上限。
 	ErrCommentTooLong = errors.New("評論長度超過上限")
+	// ErrRideNotRatable 行程尚未完成、或根本沒派到司機（派單前取消）。
+	// **不可重用遺失物的 ErrRideNotCompleted**——它的文案是「僅已完成的行程可申請
+	// 遺失物協尋」，會原樣顯示在乘客的評分對話框上，講的卻是另一個功能
+	// （2026-07-27 模擬器實跑抓到；單元測試斷言 errors.Is 而非文案，所以測不到）。
+	ErrRideNotRatable = errors.New("僅已完成的行程可以評分")
 )
 
 // ratingCommentMaxRunes 評論字數上限（DB 另有 char_length ≤ 500 的最後防線）。
@@ -54,7 +59,7 @@ func (s *RatingService) RateByCustomer(customerID, rideID int64, score int, comm
 	}
 	// 沒司機的行程（派單前取消）沒有評分對象；未完成的行程還沒有可評的服務。
 	if ride.Status != constants.RideStatusCompleted || ride.DriverID == nil {
-		return nil, ErrRideNotCompleted
+		return nil, ErrRideNotRatable
 	}
 	if existing, err := s.ratings.FindByRide(rideID); err != nil {
 		return nil, err
