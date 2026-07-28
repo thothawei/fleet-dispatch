@@ -465,6 +465,15 @@ func (s *DispatchService) CancelByDriver(ctx context.Context, rideID, driverID i
 	if customerLineID, e := s.rides.GetCustomerLineUserID(rideID); e == nil && customerLineID != "" {
 		_ = s.line.PushText(ctx, customerLineID, "司機取消了行程，正在為您重新派車")
 	}
+	// App 乘客也要收到——先前**只推 LINE**，App 端一則事件都收不到：
+	// 司機卡片停在畫面上，直到最多 15 秒後的輪詢才無聲退回「配對中」，
+	// 乘客不知道發生什麼事（2026-07-28 跨端對帳實測：司機放棄時乘客 WS 零事件）。
+	// 刻意**不用** ride.cancelled——行程並沒有取消，只是回到派單中；
+	// 送 cancelled 會讓 App 顯示「行程已取消」並清掉整筆訂單，比沒通知更糟。
+	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
+		Type:   events.TypeRideRedispatched,
+		RideID: rideID,
+	})
 	return "已放棄此訂單", nil
 }
 
