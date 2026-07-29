@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -102,8 +103,14 @@ func (h *LineWebhookHandler) handleMessage(c *gin.Context, event lineEvent) int6
 		if t := event.Message.Text; t == "取消" || t == "取消叫車" {
 			msg, err := h.dispatch.CancelByCustomer(c.Request.Context(), event.Source.UserID)
 			if err != nil {
-				msg = "取消失敗，請稍後再試"
-				log.Error().Err(err).Str("line_user_id", event.Source.UserID).Msg("客戶取消失敗")
+				// 「當下做不到」（行程已開始／狀態已變更）的文案要原樣回給客戶——
+				// 回一句「請稍後再試」會讓他一直重試一件永遠不會成功的事。
+				if errors.Is(err, service.ErrRideStarted) || errors.Is(err, service.ErrRideStateChanged) {
+					msg = err.Error()
+				} else {
+					msg = "取消失敗，請稍後再試"
+					log.Error().Err(err).Str("line_user_id", event.Source.UserID).Msg("客戶取消失敗")
+				}
 			}
 			_ = h.lineClient.ReplyText(c.Request.Context(), event.ReplyToken, msg)
 		}
