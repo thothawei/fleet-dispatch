@@ -132,6 +132,10 @@ Redis 鍵：`drivers:geo`（GEO 位置集合）、`driver:{id}:loc`（最新位�
 - ✅ **搶單鎖**：`SETNX` 確保同一單只有一位司機成單。
 - ✅ **LINE 簽章安全**：以真實 HMAC-SHA256 簽章請求驗證——正確簽章 `200`、偽造簽章 `401`、缺簽章 `401`。
 - ✅ **PostGIS**：pickup 點、`ST_DWithin` 圍籬、`ST_Length` 里程、`ST_AsGeoJSON` 回放均正確輸出。
+- ✅ **App 推播送出路徑（2026-07-30）**：`scripts/push_e2e.sh`／`push_cancel_e2e.sh`
+  以假 device token 走完整鏈路，從 log 判定收件人——**10 則推播全部推對人**
+  （行程狀態、對話、協尋各步驟），取消三條另驗到「乘客自己取消完全沒有推播」。
+  **不需 Firebase 憑證**（走 `LogPusher` stub）；憑證到位後不必改程式碼。
 
 ---
 
