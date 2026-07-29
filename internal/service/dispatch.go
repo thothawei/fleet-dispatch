@@ -424,8 +424,19 @@ func (s *DispatchService) cancelActiveRide(
 		RideID: ride.ID,
 	})
 
-	// 若已派給司機，通知司機
+	// 若已派給司機，通知司機。
+	//
+	// **WS 與 LINE 兩條都要送**：這裡先前只有 `line.PushText`，App 司機一則事件都收不到。
+	// 司機端**沒有任何輪詢**（進行中行程全靠 WS），所以行程卡會一直留在畫面上——
+	// 他會繼續開往上車點去接一個已經取消的乘客，直到按下「乘客已上車」被後端擋下才知道。
+	// 後端這時早已把他放回 Idle（releaseAndReset），畫面與真實狀態完全相反。
+	// 與 CancelByDriver 只推 LINE 給乘客是同一個 bug（dispatch#52 已修乘客那一側），
+	// 這是它在司機側的鏡像。App 端本來就有 ride.cancelled 的處理，缺的一直是這則事件。
 	if ride.DriverID != nil {
+		s.publish(events.Recipient{Role: events.RoleDriver, ID: *ride.DriverID}, events.Event{
+			Type:   events.TypeRideCancelled,
+			RideID: ride.ID,
+		})
 		if d, e := s.drivers.FindByID(*ride.DriverID); e == nil {
 			_ = s.line.PushText(ctx, d.LineUserID, fmt.Sprintf("訂單 #%d 已被取消", ride.ID))
 		}
