@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"line-fleet-dispatch/internal/constants"
+	"line-fleet-dispatch/internal/events"
 	lineclient "line-fleet-dispatch/internal/line"
 	"line-fleet-dispatch/internal/repository"
 )
@@ -157,5 +158,91 @@ func TestCancelByCustomerID_本人取消釋放鎖與司機回待命(t *testing.T
 	}
 	if !relocked {
 		t.Fatalf("預期取消後搶單鎖已釋放，其他司機應能搶到鎖")
+	}
+}
+
+// TestCancelByCustomerID_通知App司機 乘客取消**已接**的訂單時，App 司機也必須收到事件。
+//
+// 這條先前只推 LINE（`line.PushText`），App 司機一則 WS 事件都收不到。
+// 司機端**沒有任何輪詢**（進行中行程全靠 WS），所以行程卡會一直留在畫面上——
+// 他會繼續開往上車點接一個已經取消的乘客，直到按下「乘客已上車」被後端擋下才知道；
+// 而後端這時早已把他放回 Idle。這是 dispatch#52（司機放棄只通知 LINE）在司機側的鏡像。
+func TestCancelByCustomerID_通知App司機(t *testing.T) {
+	db := newServiceTestDB(t)
+	redisStore := newServiceTestRedis(t)
+	customers := repository.NewCustomerRepository(db)
+	drivers := repository.NewDriverRepository(db)
+	rides := repository.NewRideRepository(db)
+	fp := &fakePublisher{}
+	dispatch := NewDispatchService(drivers, rides, customers, redisStore,
+		lineclient.NewClient(""), nil, NewDispatchSettings(3000, 5, 20, 1, 5), fp)
+
+	cust, err := customers.FindOrCreateByLineUserID("U_cancel_notify_cust", "乘客")
+	if err != nil {
+		t.Fatalf("建立乘客失敗：%v", err)
+	}
+	drv, err := drivers.FindOrCreate("U_cancel_notify_drv", "司機")
+	if err != nil {
+		t.Fatalf("建立司機失敗：%v", err)
+	}
+	ride := newTestRide(t, rides, cust.ID, constants.RideStatusRequested)
+	if err := rides.AcceptRide(ride.ID, drv.ID, 300); err != nil {
+		t.Fatalf("接單失敗：%v", err)
+	}
+
+	if _, err := dispatch.CancelByCustomerID(context.Background(), cust.ID, ride.ID); err != nil {
+		t.Fatalf("乘客取消應成功：%v", err)
+	}
+
+	var toCustomer, toDriver *events.Event
+	for i := range fp.recv {
+		r := fp.recv[i]
+		if r.Ev.Type != events.TypeRideCancelled {
+			continue
+		}
+		switch {
+		case r.Rec.Role == events.RoleCustomer && r.Rec.ID == cust.ID:
+			toCustomer = &fp.recv[i].Ev
+		case r.Rec.Role == events.RoleDriver && r.Rec.ID == drv.ID:
+			toDriver = &fp.recv[i].Ev
+		}
+	}
+	if toCustomer == nil {
+		t.Fatalf("乘客沒收到 %s；實際發佈：%+v", events.TypeRideCancelled, fp.recv)
+	}
+	if toDriver == nil {
+		t.Fatalf("**司機**沒收到 %s——他的行程卡會一直留著；實際發佈：%+v",
+			events.TypeRideCancelled, fp.recv)
+	}
+	if toDriver.RideID != ride.ID {
+		t.Fatalf("司機收到的事件 ride_id 應為 %d，得到 %d", ride.ID, toDriver.RideID)
+	}
+}
+
+// TestCancelByCustomerID_未派單時不推司機 還沒有司機的訂單不該憑空推給誰。
+func TestCancelByCustomerID_未派單時不推司機(t *testing.T) {
+	db := newServiceTestDB(t)
+	redisStore := newServiceTestRedis(t)
+	customers := repository.NewCustomerRepository(db)
+	drivers := repository.NewDriverRepository(db)
+	rides := repository.NewRideRepository(db)
+	fp := &fakePublisher{}
+	dispatch := NewDispatchService(drivers, rides, customers, redisStore,
+		lineclient.NewClient(""), nil, NewDispatchSettings(3000, 5, 20, 1, 5), fp)
+
+	cust, err := customers.FindOrCreateByLineUserID("U_cancel_nodrv_cust", "乘客")
+	if err != nil {
+		t.Fatalf("建立乘客失敗：%v", err)
+	}
+	ride := newTestRide(t, rides, cust.ID, constants.RideStatusRequested)
+
+	if _, err := dispatch.CancelByCustomerID(context.Background(), cust.ID, ride.ID); err != nil {
+		t.Fatalf("乘客取消應成功：%v", err)
+	}
+
+	for _, r := range fp.recv {
+		if r.Rec.Role == events.RoleDriver {
+			t.Fatalf("未派單的訂單不該推事件給司機，卻推了：%+v", r)
+		}
 	}
 }
