@@ -171,6 +171,9 @@ func main() {
 	rideStopService := service.NewRideStopService(rideRepo, rideStopRepo)
 	rideStopService.SetPublisher(hub) // N7：到站／跳過即時推給乘客（行程進度）
 	chatService := service.NewChatService(rideRepo, rideMessageRepo, hub)
+	// 對話推播：對方 App 不在前景時 WS 早就斷了，漏了這行訊息只會躺在伺服器上，
+	// 要等他自己再打開 App 才看得到。
+	chatService.SetAppNotifier(appNotify)
 	lostItemService := service.NewLostItemService(rideRepo, lostItemRepo, feeSettings, hub)
 
 	if cfg.AppEnv == "production" {
