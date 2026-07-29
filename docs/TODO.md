@@ -1148,6 +1148,47 @@ admin 取消各驗到一則推播，乘客自己取消驗到**沒有**推播。
 **App 端同批**：`lost_item.created`／`lost_item.updated` 進兩端白名單，收到後**只重讀協尋清單**
 （推播 data 沒有協尋單本體；乘客端也不走「重讀行程」那條——協尋單變了不代表行程變了）。
 
+### U4. 整條推播鏈路的實跑驗證（2026-07-30，**不需 Firebase 憑證**）
+
+> U／U2／U3 的證據原本都只到 service 層（單元＋整合測試）。這一節補的是
+> **整條 HTTP 路徑真的會呼叫送出**——沒有憑證時走 `LogPusher` stub，
+> log 會印出收件裝置的 token 前綴、標題與 data，足以判定「推給誰、推了什麼」。
+
+**做法**（本機起 postgis＋redis 容器、`go run ./cmd/server`；
+`FCM_CREDENTIALS_FILE` 留空 → log 出現「未設定 FCM_CREDENTIALS_FILE，App 推播使用 stub」）：
+註冊司機／乘客各自的 device token（`DRIVER-FCM-TOKEN`／`CUSTOMER-FCM-TOKEN`
+——**token 前綴就是判斷推給誰的依據**），然後用 curl 走完整條鏈路。
+
+**實測結果（2026-07-30，10 則推播，收件人全部正確）**：
+
+| 動作 | 推播 data.type | 標題 | 收件裝置 |
+|---|---|---|---|
+| 派單 | `ride.assigned` | 新派單 #2 | `DRIVER-F…` |
+| 司機接單 | `ride.accepted` | 司機已接單 | `CUSTOMER…` |
+| 進上車圍籬 | `driver.arrived` | 司機已抵達 | `CUSTOMER…` |
+| 乘客發話 | `chat.message` | 乘客傳來訊息 | `DRIVER-F…` |
+| 司機發話 | `chat.message` | 司機傳來訊息 | `CUSTOMER…` |
+| 完成行程 | `ride.completed` | 行程已完成 | `CUSTOMER…` |
+| 乘客建協尋單 | `lost_item.created` | 乘客回報遺失物 | `DRIVER-F…` |
+| 司機標記尋獲 | `lost_item.updated` | 司機找到你的遺失物了 | `CUSTOMER…` |
+| 乘客付處理費 | `lost_item.updated` | 乘客已支付處理費 | `DRIVER-F…` |
+| 司機標記歸還 | `lost_item.updated` | 遺失物已歸還 | `CUSTOMER…` |
+
+**取消那三條另跑一輪**（同日）：
+- **乘客自己取消 → 完全沒有推播**（只有先前那則派單邀請）——負向斷言成立。
+- **admin 取消 → `ride.cancelled`「行程已取消」給乘客**。
+- **司機接單後放棄 → `ride.accepted` 後緊接 `ride.redispatched`「正在重新為您派車」給乘客**。
+
+**踩到的坑（留給下次跑的人）**：
+1. **本機 Docker 拉不到 registry**（`load metadata for docker.io/library/golang:1.25-alpine` 會卡死），
+   所以 `docker compose up --build` 起不來。**改用 `docker compose up -d postgis redis`
+   ＋本機 `go run ./cmd/server`**（DB_HOST=localhost DB_PORT=5433）——postgis／redis 映像本機已有。
+2. `PUT /api/driver/vehicle` 的車牌有**長度上限**，拿 epoch 當後綴會被 400「車牌格式錯誤」擋下。
+3. `POST /api/admin/drivers/:id/vehicle-review` 的參數是 **`{"approve":true}`**，不是 `{"status":"approved"}`。
+4. `POST /api/rides` 回的是 **`ride_id`** 不是 `id`。
+
+**仍未做**：真 Firebase 憑證下的端到端（手機真的響），那是 A2 的同一個卡點。
+
 ---
 
 ## 下次任務
