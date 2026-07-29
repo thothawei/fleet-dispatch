@@ -228,6 +228,15 @@ func (s *TrackingService) PickUp(ctx context.Context, rideID, driverID int64) (*
 		Type:   events.TypeRidePickedUp,
 		RideID: rideID,
 	})
+	// 也推給司機——**多裝置／跨管道**：這個標記可能來自他的第二台裝置或 LINE。
+	// 沒有這則事件，另一台會停在「前往上車點」階段、按鈕還是「乘客已上車」，
+	// 按下去只會被後端拒絕（狀態已是 PickedUp），而「放棄此單」這時也已不可用。
+	// 動作來源那台會多收到一則自己造成的事件（它已經自己切好階段了）——
+	// 一次無害的重複，遠比兩台顯示不同階段便宜。與 ride.stop_updated（#53）同一原則。
+	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
+		Type:   events.TypeRidePickedUp,
+		RideID: rideID,
+	})
 	customerLineID, _ := s.rides.GetCustomerLineUserID(rideID)
 	if customerLineID != "" {
 		_ = s.line.PushText(ctx, customerLineID, "行程開始，祝您旅途愉快")
