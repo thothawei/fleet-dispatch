@@ -305,11 +305,37 @@ func (s *DispatchService) pushOffer(ctx context.Context, driver *model.Driver, r
 			rideOfferPushData(ride, ride.PickupAddress, etaSec, distM),
 		)
 	}
+	// 記錄「這單推給過他」——接單／取消時要靠它把沒搶到的人手機上的接單卡收掉。
+	// 失敗只記 log：漏記一位的後果是他的卡片留著（＝修正前的行為），不該擋住派單。
+	if err := s.redis.OfferRideDriver(ctx, ride.ID, driver.ID); err != nil {
+		log.Error().Err(err).Int64("ride_id", ride.ID).Int64("driver_id", driver.ID).
+			Msg("記錄派單對象失敗（接單後將無法收掉他的接單卡）")
+	}
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driver.ID}, events.Event{
 		Type:    events.TypeRideAssigned,
 		RideID:  ride.ID,
 		Payload: rideAssignedPayload(ride, ride.PickupAddress, etaSec, distM, s.rideStops(ride.ID)),
 	})
+}
+
+// notifyOfferedDrivers 通知「收過本單 offer」的司機，並清掉該集合。
+//
+// exceptID 為 0 時通知全部（取消情境）；否則跳過該司機（接單者自己已經收到 ride.accepted）。
+// 沒有這一步，沒搶到的司機手機上那張全螢幕接單卡**沒有任何東西收得掉**——
+// 他要自己按下去、拿到「手慢了，這單已被其他司機接走」才會消失。
+func (s *DispatchService) notifyOfferedDrivers(
+	ctx context.Context, rideID int64, eventType string, exceptID int64,
+) {
+	for _, id := range s.redis.OfferedDrivers(ctx, rideID) {
+		if id == exceptID {
+			continue
+		}
+		s.publish(events.Recipient{Role: events.RoleDriver, ID: id}, events.Event{
+			Type:   eventType,
+			RideID: rideID,
+		})
+	}
+	s.redis.ClearOffered(ctx, rideID)
 }
 
 // giveUpIfUnaccepted 逾時仍無人接單 → 取消訂單並通知客戶（避免永久停在 ASSIGNED）
@@ -330,6 +356,8 @@ func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
 	s.audit.record(rideID, statusPtr(from), constants.RideStatusCancelled,
 		events.TypeRideCancelled, events.ActorSystem, nil, "dispatch_timeout")
 	s.redis.ClearRejected(ctx, rideID)
+	// 逾時取消先前**只通知乘客**，收過 offer 的司機卡片一樣留著（T3）。
+	s.notifyOfferedDrivers(ctx, rideID, events.TypeRideCancelled, 0)
 	log.Warn().Int64("ride_id", rideID).Msg("逾時無人接單，訂單自動取消")
 
 	reason, text, payload := giveUpCancelInfo(ride)
@@ -418,6 +446,9 @@ func (s *DispatchService) cancelActiveRide(
 	s.audit.record(ride.ID, statusPtr(from), constants.RideStatusCancelled,
 		events.TypeRideCancelled, actorRole, actorID, note)
 	s.releaseAndReset(ctx, ride.ID, ride.DriverID)
+	// 還沒有人接單就被取消時（status=Assigned），收過 offer 的司機全都留著卡片；
+	// 已接單的情境下這個集合通常已在接單時清空，這裡再呼叫一次是冪等的。
+	s.notifyOfferedDrivers(ctx, ride.ID, events.TypeRideCancelled, 0)
 	log.Info().Int64("ride_id", ride.ID).Str("actor", actorRole).Msg("訂單已取消")
 	s.publish(events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID}, events.Event{
 		Type:   events.TypeRideCancelled,
@@ -574,6 +605,9 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		RideID:  rideID,
 		Payload: rideAcceptedCustomerPayload(driver, etaSec),
 	})
+	// 沒搶到的司機：把他們的接單卡收掉（T2）。必須在接單者的 ride.accepted 之外另送，
+	// 因為 ride.accepted 的收件人是「接到的那位」。
+	s.notifyOfferedDrivers(ctx, rideID, events.TypeRideTaken, driverID)
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
 		Type:    events.TypeRideAccepted,
 		RideID:  rideID,

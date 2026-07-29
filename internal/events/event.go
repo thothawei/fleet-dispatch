@@ -28,6 +28,12 @@ const (
 	// TypeRideStopUpdated 司機標記到達／跳過某一站（N7）。payload 帶**整趟 stops**，
 	// 收到整批覆蓋即可，不必自己套用差異——乘客端據此顯示「走到第幾站」。
 	TypeRideStopUpdated = "ride.stop_updated"
+
+	// TypeRideTaken 這單已被別人接走——**只送給本輪收過 offer 但沒接到的司機**。
+	// 他們的手機上留著一張全螢幕接單卡，先前沒有任何事件收得掉它：
+	// ride.accepted 只送給接到的那位，逾時取消也只通知乘客。
+	// 不能用 ride.cancelled 代替——訂單並沒有取消，只是不是他的了。
+	TypeRideTaken = "ride.taken"
 )
 
 // 審計 actor_role

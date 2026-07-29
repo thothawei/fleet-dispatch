@@ -116,6 +116,41 @@ func (s *Store) ClearRejected(ctx context.Context, rideID int64) {
 	s.client.Del(ctx, fmt.Sprintf("ride:%d:rejected", rideID))
 }
 
+// OfferRideDriver 記錄「本單已推給這位司機」。
+//
+// 一輪派單會**同時**推給半徑內每一位符合條件的司機，只有一位搶得到；
+// 其餘的人手機上留著一張全螢幕接單卡，而後端先前**沒有任何方式**通知他們這單沒了
+// （`offered` 只是 dispatchRound 遞迴中的記憶體 map，接單／取消流程都拿不到）。
+// 這個集合讓「已被接走／已取消」時能把那些卡片收掉。
+func (s *Store) OfferRideDriver(ctx context.Context, rideID, driverID int64) error {
+	key := fmt.Sprintf("ride:%d:offered", rideID)
+	if err := s.client.SAdd(ctx, key, driverID).Err(); err != nil {
+		return err
+	}
+	// 與拒接集合同一個 TTL：派單輪次全部走完也遠短於 30 分鐘，過期即自然清掉。
+	return s.client.Expire(ctx, key, 30*time.Minute).Err()
+}
+
+// OfferedDrivers 取得本單收過派單邀請的司機集合。
+func (s *Store) OfferedDrivers(ctx context.Context, rideID int64) []int64 {
+	vals, err := s.client.SMembers(ctx, fmt.Sprintf("ride:%d:offered", rideID)).Result()
+	if err != nil {
+		return nil
+	}
+	ids := make([]int64, 0, len(vals))
+	for _, v := range vals {
+		if id, e := strconv.ParseInt(v, 10, 64); e == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// ClearOffered 清掉本單的已派送集合（接單／取消後）。
+func (s *Store) ClearOffered(ctx context.Context, rideID int64) {
+	s.client.Del(ctx, fmt.Sprintf("ride:%d:offered", rideID))
+}
+
 // GetDriverLocation 取得司機最新位置
 func (s *Store) GetDriverLocation(ctx context.Context, driverID int64) (lat, lng float64, ok bool) {
 	idStr := strconv.FormatInt(driverID, 10)
