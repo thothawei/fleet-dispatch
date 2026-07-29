@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -9,6 +11,7 @@ import (
 	"line-fleet-dispatch/internal/constants"
 	"line-fleet-dispatch/internal/events"
 	"line-fleet-dispatch/internal/model"
+	"line-fleet-dispatch/internal/notify"
 	"line-fleet-dispatch/internal/repository"
 )
 
@@ -30,6 +33,15 @@ type LostItemService struct {
 	items     *repository.LostItemRepository
 	fees      *FeeSettings
 	publisher events.Publisher
+	appNotify *notify.Dispatcher
+}
+
+// SetAppNotifier 注入 App 推播；可選。
+//
+// 協尋的節奏是**小時級**（司機要回車上翻、乘客要等），雙方幾乎都不在 App 前景——
+// 沒有推播的話，每一步都要靠當事人自己想起來去開 App 看，整條流程就停在那裡。
+func (s *LostItemService) SetAppNotifier(d *notify.Dispatcher) {
+	s.appNotify = d
 }
 
 func NewLostItemService(rides *repository.RideRepository, items *repository.LostItemRepository, fees *FeeSettings, publisher events.Publisher) *LostItemService {
@@ -81,6 +93,8 @@ func (s *LostItemService) CreateByCustomer(customerID, rideID int64, description
 		return nil, err
 	}
 	s.publishItem(item, events.TypeLostItemCreated)
+	// 建單的是乘客，所以推給司機。
+	s.pushLostItem(item, events.TypeLostItemCreated, events.RoleDriver, "乘客回報遺失物", item.Description)
 	return item, nil
 }
 
@@ -166,7 +180,57 @@ func (s *LostItemService) transition(role string, subjectID, itemID int64, from 
 		return nil, err
 	}
 	s.publishItem(item, events.TypeLostItemUpdated)
+	// 推給**對方**：司機標記尋獲／歸還時推乘客，乘客付款／取消時推司機。
+	// 動作發起者自己剛按完，系統匣再跳一則只是噪音。
+	if role == events.RoleDriver {
+		s.pushLostItem(item, events.TypeLostItemUpdated, events.RoleCustomer,
+			lostItemPushTitle(events.RoleCustomer, to), item.Description)
+	} else {
+		s.pushLostItem(item, events.TypeLostItemUpdated, events.RoleDriver,
+			lostItemPushTitle(events.RoleDriver, to), item.Description)
+	}
 	return item, nil
+}
+
+// lostItemPushTitle 依「推給誰」與「轉成什麼狀態」給標題。
+//
+// 標題要講**收訊者接下來要做什麼**——「已尋獲」對乘客的意思是「該付處理費了」。
+func lostItemPushTitle(recipientRole, status string) string {
+	switch status {
+	case constants.LostItemStatusFound:
+		return "司機找到你的遺失物了"
+	case constants.LostItemStatusPaid:
+		return "乘客已支付處理費"
+	case constants.LostItemStatusReturned:
+		return "遺失物已歸還"
+	case constants.LostItemStatusClosed:
+		if recipientRole == events.RoleCustomer {
+			return "協尋已結案"
+		}
+		return "乘客取消了協尋"
+	default:
+		return "協尋單有更新"
+	}
+}
+
+// pushLostItem 推一則協尋通知給指定角色。
+//
+// data 只帶 type 與 ride_id：App 醒來後重讀協尋清單（狀態可能又變過了），
+// 與行程狀態推播同一條原則。用 context.Background()——推播是回應之後的背景動作。
+func (s *LostItemService) pushLostItem(item *model.LostItemRequest, eventType, recipientRole, title, body string) {
+	if s.appNotify == nil {
+		return
+	}
+	ctx := context.Background()
+	data := map[string]string{
+		"type":    eventType,
+		"ride_id": strconv.FormatInt(item.RideID, 10),
+	}
+	if recipientRole == events.RoleDriver {
+		s.appNotify.NotifyDriverRideUpdate(ctx, item.DriverID, item.RideID, title, previewText(body), data)
+		return
+	}
+	s.appNotify.NotifyCustomerRideUpdate(ctx, item.CustomerID, item.RideID, title, previewText(body), data)
 }
 
 // publishItem 推播協尋單事件給行程雙方。

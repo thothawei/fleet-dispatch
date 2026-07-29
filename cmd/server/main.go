@@ -175,6 +175,8 @@ func main() {
 	// 要等他自己再打開 App 才看得到。
 	chatService.SetAppNotifier(appNotify)
 	lostItemService := service.NewLostItemService(rideRepo, lostItemRepo, feeSettings, hub)
+	// 協尋推播：這條流程是小時級的，雙方幾乎都不在 App 前景，只靠 WS 等於沒有通知。
+	lostItemService.SetAppNotifier(appNotify)
 
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
