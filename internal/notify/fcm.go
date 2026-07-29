@@ -43,6 +43,21 @@ func NewFCMPusher(ctx context.Context, credentialsFile string) (*FCMPusher, erro
 // 逐台送、逐台判斷失敗——一台 token 失效（換機、重裝）不該讓其他裝置收不到；
 // 全部失敗才回錯，讓 Dispatcher 打一條 log（但仍不中斷派單）。
 func (p *FCMPusher) SendRideOffer(ctx context.Context, devices []Device, rideID int64, title, body string, data map[string]string) error {
+	return p.send(ctx, devices, rideID, title, body, data, "派單")
+}
+
+// SendRideUpdate 送乘客端行程狀態更新推播。
+//
+// 與派單邀請共用送出邏輯，也同樣 Priority=high——「司機已抵達」晚到就沒有意義了。
+// 差別只在 log 的 kind 標記，讓兩條路徑的成功／失敗在 log 裡分得開。
+func (p *FCMPusher) SendRideUpdate(ctx context.Context, devices []Device, rideID int64, title, body string, data map[string]string) error {
+	return p.send(ctx, devices, rideID, title, body, data, "行程狀態")
+}
+
+func (p *FCMPusher) send(
+	ctx context.Context, devices []Device, rideID int64,
+	title, body string, data map[string]string, kind string,
+) error {
 	tokens := make([]string, 0, len(devices))
 	for _, d := range devices {
 		if d.Platform == PlatformFCM && d.Token != "" {
@@ -78,6 +93,7 @@ func (p *FCMPusher) SendRideOffer(ctx context.Context, devices []Device, rideID 
 					Err(r.Error).
 					Str("token_prefix", tokenPrefix(tokens[i])).
 					Int64("ride_id", rideID).
+					Str("kind", kind).
 					Msg("FCM 單台推播失敗（token 可能失效）")
 			}
 		}
@@ -89,6 +105,7 @@ func (p *FCMPusher) SendRideOffer(ctx context.Context, devices []Device, rideID 
 		Int("success", resp.SuccessCount).
 		Int("failure", resp.FailureCount).
 		Int64("ride_id", rideID).
-		Msg("FCM 派單推播已送出")
+		Str("kind", kind).
+		Msg("FCM 推播已送出")
 	return nil
 }

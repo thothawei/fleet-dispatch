@@ -1049,6 +1049,55 @@ admin 端對應：fleet-frontEnd PR #22（司機管理頁評價欄、訂單詳�
 
 ---
 
+## 📲 U. 乘客端 App 推播的送出路徑（2026-07-30 補上）
+
+> 來源：fleet-app 第九輪盤點的「候選 1」。App 端已於 fleet-app PR #78 接完線
+> （登入後 `POST /api/customer/device-token`、推播只當對帳訊號），
+> **但後端一則都送不出去**——`notify.Dispatcher` 只有 `NotifyDriverRideOffer` 一個方法。
+> 也就是說 `/api/customer/device-token` 這支端點從上線那天起，收到的 token 就沒有任何用途。
+
+**症狀（改之前）**：乘客把 App 收到背景 → WS 斷線 → 司機接單／抵達／完成／取消時
+**手機上完全沒有任何通知**，要等他自己再打開 App、輪詢跑一次才知道。
+LINE 那條管道有推文字訊息，但那是 LINE 官方帳號的對話，不是 App 通知。
+
+**做了什麼**：
+
+- [x] **`AppPusher` 加 `SendRideUpdate`**、`Dispatcher` 加 `NotifyCustomerRideUpdate`。
+      與派單邀請分兩個方法，是為了讓失敗的 log 分得出是哪一條路徑
+      （派單失敗記在司機那筆、行程更新失敗記在乘客那筆）。
+      `FCMPusher` 兩條共用同一段送出邏輯，同樣 `Priority=high`——
+      「司機已抵達」晚到就沒有意義了。
+- [x] **接上五種事件**：`ride.accepted`（接單）、`driver.arrived`（進圍籬）、
+      `ride.completed`（完成）、`ride.cancelled`（逾時無人接單／他人取消）、
+      `ride.redispatched`（司機放棄後重派）。`TrackingService` 也補了 `SetAppNotifier`
+      （先前只有 `DispatchService` 有，抵達與完成這兩則因此送不出去）。
+- [x] **白名單與 App 端對齊**（`lib/core/push/push_payload.dart` 的 `_customerPushTypes`）：
+      App 收到白名單外的 type 直接丟掉，後端多送只是白燒推播額度。
+      **特別不送 `driver.location`**——司機每 8 秒回報一次，拿它推播會把電池與額度燒光。
+- [x] **data 只帶 `type` 與 `ride_id`**：App 把推播只當對帳訊號，醒來後重讀 `rides/active`。
+      車資、司機姓名這類會變的欄位一律不放——推播可能延遲數十秒才到，
+      內容早就過期，直接顯示反而會讓 App 說謊。
+- [x] **乘客自己按的取消不推播**：他人就在 App 前景、剛按下去，系統匣再跳一則只是噪音。
+      admin／系統（逾時）取消才推。
+
+**順手修掉的一個洞**：`checkGeofence` 原本是
+`if err != nil || customerLineID == "" { return }`——**整個抵達通知（含 WS 事件與審計記錄）
+都掛在 LINE ID 查得到與否**。現行資料下每位乘客都有 `line_user_id`（App 註冊也用它當帳號），
+所以還沒有人踩到；但這是一顆定時炸彈：哪天有一條建立乘客的路徑沒填它，
+司機到了乘客端會完全無聲。已改成「LINE 只是其中一條管道，查不到就只跳過那一條」。
+
+**驗收（2026-07-30 實跑）**：`go test ./internal/notify/` 綠；
+service 層四支整合測試（真 PostGIS + Redis 容器）通過——接單、進圍籬、完成、
+admin 取消各驗到一則推播，乘客自己取消驗到**沒有**推播。
+**反向確認**：把 `notifyCustomerRide` 改成永遠早退，四支全部 FAIL，
+確認斷言吃的是真的送出路徑而不是別的東西。
+
+**還缺的一半（不在後端）**：Firebase 專案憑證（`FCM_CREDENTIALS_FILE`）。
+沒有憑證時走 `LogPusher` stub——這條路徑照樣可驗（log 印得出要送給誰、送什麼 data），
+但手機不會真的響。憑證到位後不必再改程式碼。
+
+---
+
 ## 下次任務
 
 **新需求（2026-07-16 加入，尚未實作，皆需後端地基先行）**：
@@ -1088,7 +1137,9 @@ admin 端對應：fleet-frontEnd PR #22（司機管理頁評價欄、訂單詳�
 其餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
 
 1. **協尋/對話 Phase 2 剩餘**：遺失物處理費真金流（目前記帳式確認）；
-   聊天訊息 FCM 推播（App 被殺時）。~~admin 協尋單總覽＋對話稽核 UI~~ ✅ 2026-07-15
+   聊天訊息 FCM 推播（App 被殺時）——**送出的地基已在 U 章備妥**
+   （`Dispatcher.NotifyCustomerRideUpdate`），要做的是決定聊天訊息要不要另立一種 data type，
+   以及 App 端收到後怎麼處理（現行白名單只收行程狀態五種）。~~admin 協尋單總覽＋對話稽核 UI~~ ✅ 2026-07-15
    （後端 H4 `GET /api/admin/lost-items`＋前端 fleet-frontEnd#11）。
 2. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
 3. **drivers／membership 真分頁**：逼近 `MaxListRows=5000` 上限時，比照 rides 改 offset/keyset 伺服器端分頁（含前端）。

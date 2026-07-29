@@ -155,6 +155,9 @@ func main() {
 		hub,
 	)
 	trackingService.SetRideEvents(rideEventRepo)
+	// 乘客端推播：司機已抵達／行程完成也要送到手機。漏了這行，這兩則只有 WS——
+	// 而乘客把 App 收在背景時 WS 早就斷了。
+	trackingService.SetAppNotifier(appNotify)
 	trackingService.SetFeeSettings(feeSettings)
 	trackingService.SetOSRM(osrm)          // F3：軌跡里程偏低時以 OSRM 路線里程作計費地板
 	trackingService.SetReports(reportRepo) // F9-3：完成時重算每日彙總 daily_driver_earnings

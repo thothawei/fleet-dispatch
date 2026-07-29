@@ -11,6 +11,7 @@ import (
 	"line-fleet-dispatch/internal/events"
 	lineclient "line-fleet-dispatch/internal/line"
 	"line-fleet-dispatch/internal/model"
+	"line-fleet-dispatch/internal/notify"
 	osrmclient "line-fleet-dispatch/internal/osrm"
 	redisstore "line-fleet-dispatch/internal/redis"
 	"line-fleet-dispatch/internal/repository"
@@ -40,6 +41,7 @@ type TrackingService struct {
 	osrm      *osrmclient.Client
 	reports   *repository.ReportRepository
 	stops     *repository.RideStopRepository
+	appNotify *notify.Dispatcher
 
 	etaMinInterval   time.Duration
 	etaDistThreshold float64
@@ -92,6 +94,12 @@ func (s *TrackingService) SetOSRM(osrm *osrmclient.Client) {
 // SetReports 注入報表 repo，完成行程時重算該 (司機,日) 的預聚合彙總（F9-3）；可選。
 func (s *TrackingService) SetReports(reports *repository.ReportRepository) {
 	s.reports = reports
+}
+
+// SetAppNotifier 注入 App 推播，讓「司機已抵達」「行程已完成」也送得到乘客手機；可選。
+// 未注入時只有 WS 事件——App 不在前景時 WS 已斷，乘客要等回前景輪詢才知道。
+func (s *TrackingService) SetAppNotifier(d *notify.Dispatcher) {
+	s.appNotify = d
 }
 
 // SetStops 注入停靠點 repo，完成計費時改用全程多點路線（N5）；可選——
@@ -183,12 +191,13 @@ func (s *TrackingService) checkGeofence(ctx context.Context, ride *model.Ride, l
 	s.geofenced[ride.ID] = true
 	s.mu.Unlock()
 
-	customerLineID, err := s.rides.GetCustomerLineUserID(ride.ID)
-	if err != nil || customerLineID == "" {
-		return
-	}
 	log.Info().Int64("ride_id", ride.ID).Msg("司機進入上車圍籬")
-	_ = s.line.PushText(ctx, customerLineID, "司機已抵達上車點，請準備上車")
+	// LINE 推播是**其中一條**管道，查不到 LINE ID 只跳過這一條。
+	// 先前這裡是 `if err != nil || customerLineID == "" { return }`——整個抵達通知
+	// （含 WS 事件與審計）都掛在 LINE ID 上，沒有 LINE ID 的乘客等於司機到了卻無聲。
+	if customerLineID, err := s.rides.GetCustomerLineUserID(ride.ID); err == nil && customerLineID != "" {
+		_ = s.line.PushText(ctx, customerLineID, "司機已抵達上車點，請準備上車")
+	}
 	actor := (*int64)(nil)
 	if ride.DriverID != nil {
 		actor = ride.DriverID
@@ -199,6 +208,9 @@ func (s *TrackingService) checkGeofence(ctx context.Context, ride *model.Ride, l
 		Type:   events.TypeDriverArrived,
 		RideID: ride.ID,
 	})
+	// 這則最需要推播：乘客多半把 App 收在背景等通知，司機到了卻只有 WS 事件，
+	// App 根本不在線上收不到。
+	notifyCustomerRide(ctx, s.appNotify, ride.CustomerID, ride.ID, events.TypeDriverArrived)
 }
 
 // PickUpResult 回給司機端上車後導航去目的地所需的資訊。
@@ -377,6 +389,9 @@ func (s *TrackingService) Complete(ctx context.Context, rideID, driverID int64) 
 		RideID:  rideID,
 		Payload: completedPayload,
 	})
+	// 推播不帶車資：完成卡的金額由 App 重讀後端取得，推播只負責把人叫回 App
+	// （車資可能在推播抵達前就因清潔費／調整而不同）。
+	notifyCustomerRide(ctx, s.appNotify, ride.CustomerID, rideID, events.TypeRideCompleted)
 	s.publish(events.Recipient{Role: events.RoleDriver, ID: driverID}, events.Event{
 		Type:   events.TypeRideCompleted,
 		RideID: rideID,
