@@ -1124,6 +1124,71 @@ admin 取消各驗到一則推播，乘客自己取消驗到**沒有**推播。
 （推播 data 沒有訊息本體，餵給 `RideMessage.fromJson` 只會解析失敗被丟掉；
 內容等聊天室自己以 REST 補齊）。
 
+### U3. 協尋單每一步也推播（2026-07-30）
+
+> 協尋的節奏是**小時級**（司機要回車上翻、乘客要等），雙方幾乎都不在 App 前景。
+> 先前每一步都只走 WS，整條流程等於要靠當事人自己想起來去開 App 看——
+> **建了單司機不知道、找到了乘客不知道、付了款司機不知道**。
+
+- [x] `LostItemService` 加 `SetAppNotifier`；建單推司機，之後**每一次狀態轉換推給對方**
+      （司機標記尋獲／歸還 → 推乘客；乘客付款／取消 → 推司機）。
+      動作發起者自己剛按完，系統匣再跳一則只是噪音。
+- [x] **標題講的是「收訊者接下來要做什麼」**，不是內部狀態名：
+      `found` 對乘客是「司機找到你的遺失物了」（＝該付處理費了）、
+      `closed` 對乘客是「協尋已結案」但對司機是「乘客取消了協尋」——
+      同一個狀態對兩邊的意思不一樣，共用一句文案會有一邊看不懂。
+- [x] data 只帶 `type`＋`ride_id`，內容（物品描述）放通知本文並以 rune 截斷；
+      App 醒來後重讀協尋清單（狀態可能又變過了）。
+
+**驗收（2026-07-30 實跑）**：`go test ./internal/service -run 'TestLostItem'` ——
+整合測試走完 open→found→paid→returned 四步，逐步驗到「推給對方」的標題與 data type；
+`TestLostItemPushTitle` 釘住五種標題（含 closed 的兩種說法）；
+未注入 notifier 仍可建單。
+
+**App 端同批**：`lost_item.created`／`lost_item.updated` 進兩端白名單，收到後**只重讀協尋清單**
+（推播 data 沒有協尋單本體；乘客端也不走「重讀行程」那條——協尋單變了不代表行程變了）。
+
+### U4. 整條推播鏈路的實跑驗證（2026-07-30，**不需 Firebase 憑證**）
+
+> U／U2／U3 的證據原本都只到 service 層（單元＋整合測試）。這一節補的是
+> **整條 HTTP 路徑真的會呼叫送出**——沒有憑證時走 `LogPusher` stub，
+> log 會印出收件裝置的 token 前綴、標題與 data，足以判定「推給誰、推了什麼」。
+
+**做法**（本機起 postgis＋redis 容器、`go run ./cmd/server`；
+`FCM_CREDENTIALS_FILE` 留空 → log 出現「未設定 FCM_CREDENTIALS_FILE，App 推播使用 stub」）：
+註冊司機／乘客各自的 device token（`DRIVER-FCM-TOKEN`／`CUSTOMER-FCM-TOKEN`
+——**token 前綴就是判斷推給誰的依據**），然後用 curl 走完整條鏈路。
+
+**實測結果（2026-07-30，10 則推播，收件人全部正確）**：
+
+| 動作 | 推播 data.type | 標題 | 收件裝置 |
+|---|---|---|---|
+| 派單 | `ride.assigned` | 新派單 #2 | `DRIVER-F…` |
+| 司機接單 | `ride.accepted` | 司機已接單 | `CUSTOMER…` |
+| 進上車圍籬 | `driver.arrived` | 司機已抵達 | `CUSTOMER…` |
+| 乘客發話 | `chat.message` | 乘客傳來訊息 | `DRIVER-F…` |
+| 司機發話 | `chat.message` | 司機傳來訊息 | `CUSTOMER…` |
+| 完成行程 | `ride.completed` | 行程已完成 | `CUSTOMER…` |
+| 乘客建協尋單 | `lost_item.created` | 乘客回報遺失物 | `DRIVER-F…` |
+| 司機標記尋獲 | `lost_item.updated` | 司機找到你的遺失物了 | `CUSTOMER…` |
+| 乘客付處理費 | `lost_item.updated` | 乘客已支付處理費 | `DRIVER-F…` |
+| 司機標記歸還 | `lost_item.updated` | 遺失物已歸還 | `CUSTOMER…` |
+
+**取消那三條另跑一輪**（同日）：
+- **乘客自己取消 → 完全沒有推播**（只有先前那則派單邀請）——負向斷言成立。
+- **admin 取消 → `ride.cancelled`「行程已取消」給乘客**。
+- **司機接單後放棄 → `ride.accepted` 後緊接 `ride.redispatched`「正在重新為您派車」給乘客**。
+
+**踩到的坑（留給下次跑的人）**：
+1. **本機 Docker 拉不到 registry**（`load metadata for docker.io/library/golang:1.25-alpine` 會卡死），
+   所以 `docker compose up --build` 起不來。**改用 `docker compose up -d postgis redis`
+   ＋本機 `go run ./cmd/server`**（DB_HOST=localhost DB_PORT=5433）——postgis／redis 映像本機已有。
+2. `PUT /api/driver/vehicle` 的車牌有**長度上限**，拿 epoch 當後綴會被 400「車牌格式錯誤」擋下。
+3. `POST /api/admin/drivers/:id/vehicle-review` 的參數是 **`{"approve":true}`**，不是 `{"status":"approved"}`。
+4. `POST /api/rides` 回的是 **`ride_id`** 不是 `id`。
+
+**仍未做**：真 Firebase 憑證下的端到端（手機真的響），那是 A2 的同一個卡點。
+
 ---
 
 ## 下次任務
