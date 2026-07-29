@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -29,7 +30,6 @@ import (
 
 func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
 
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
 		runMigrateOnly()
@@ -40,6 +40,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("載入設定失敗")
 	}
+	setupLogger(cfg)
 
 	if err := database.RunMigrations(cfg.MigrateDSN(), "db/migrations"); err != nil {
 		log.Fatal().Err(err).Msg("資料庫 migration 失敗")
@@ -174,6 +175,8 @@ func main() {
 	}
 
 	r := gin.New()
+	// RequestLogger 放最外層，讓 panic 被 Recovery 接住後仍記得到那筆 500。
+	r.Use(middleware.RequestLogger())
 	r.Use(gin.Recovery())
 	r.Use(middleware.CORS())
 
@@ -363,6 +366,33 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Info().Msg("收到關閉信號，正在停止...")
+}
+
+// newLogger 依環境組出 logger。
+//
+// production 走 zerolog 的 JSON 輸出，讓 ride_id、duration_ms 這類欄位在集中式日誌平台
+// 可被當成結構化欄位查詢；本機開發才換成人類可讀的 ConsoleWriter。
+// 先前無條件套用 ConsoleWriter，等於把結構化欄位重新攤平回字串，上線後只能全文比對。
+//
+// 輸出目標以參數傳入而非寫死 os.Stdout，是為了讓測試能斷言實際輸出的格式。
+func newLogger(cfg *config.Config, out io.Writer) zerolog.Logger {
+	if cfg.AppEnv != "production" {
+		out = zerolog.ConsoleWriter{Out: out, TimeFormat: time.RFC3339}
+	}
+	return zerolog.New(out).With().Timestamp().Logger()
+}
+
+// setupLogger 套用 logger 與日誌級別。
+// LOG_LEVEL 可在不改程式的情況下臨時調高細節（如 debug），排查完再調回。
+func setupLogger(cfg *config.Config) {
+	log.Logger = newLogger(cfg, os.Stdout)
+
+	lvl, err := zerolog.ParseLevel(cfg.LogLevel)
+	if err != nil || lvl == zerolog.NoLevel {
+		log.Warn().Str("log_level", cfg.LogLevel).Msg("LOG_LEVEL 無法解析，退回 info")
+		lvl = zerolog.InfoLevel
+	}
+	zerolog.SetGlobalLevel(lvl)
 }
 
 func runMigrateOnly() {

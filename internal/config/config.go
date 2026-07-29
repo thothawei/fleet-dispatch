@@ -10,6 +10,9 @@ import (
 type Config struct {
 	AppPort int
 	AppEnv  string
+	// LogLevel zerolog 級別（trace/debug/info/warn/error）。production 常態走 info，
+	// 排查時可臨時調 debug 而不必改程式重新部署。
+	LogLevel string
 
 	DBHost     string
 	DBPort     int
@@ -60,6 +63,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		AppPort:                 getEnvInt("APP_PORT", 8080),
 		AppEnv:                  getEnv("APP_ENV", "local"),
+		LogLevel:                getEnv("LOG_LEVEL", "info"),
 		DBHost:                  getEnv("DB_HOST", "localhost"),
 		DBPort:                  getEnvInt("DB_PORT", 5432),
 		DBName:                  getEnv("DB_NAME", "fleet"),
