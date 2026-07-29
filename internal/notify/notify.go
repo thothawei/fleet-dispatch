@@ -79,20 +79,36 @@ func (d *Dispatcher) NotifyDriverRideOffer(ctx context.Context, driverID, rideID
 // 失敗只打 log：乘客收不到推播的後果是「App 在背景時晚一點才知道」，
 // 不該讓接單／完成這些主鏈路動作跟著失敗。
 func (d *Dispatcher) NotifyCustomerRideUpdate(ctx context.Context, customerID, rideID int64, title, body string, data map[string]string) {
+	d.notifyRideUpdate(ctx, RoleCustomer, customerID, rideID, title, body, data)
+}
+
+// NotifyDriverRideUpdate 推播「這趟車有新狀況」給司機的所有裝置。
+//
+// 與 [Dispatcher.NotifyDriverRideOffer] 的差別是**用途**：那支是派單邀請（要開接單卡），
+// 這支是行程進行中的通知（目前是乘客傳來的對話訊息）。
+func (d *Dispatcher) NotifyDriverRideUpdate(ctx context.Context, driverID, rideID int64, title, body string, data map[string]string) {
+	d.notifyRideUpdate(ctx, RoleDriver, driverID, rideID, title, body, data)
+}
+
+func (d *Dispatcher) notifyRideUpdate(
+	ctx context.Context, role string, subjectID, rideID int64,
+	title, body string, data map[string]string,
+) {
 	if d == nil || d.tokens == nil {
 		return
 	}
-	devices, err := d.tokens.ListBySubject(RoleCustomer, customerID)
+	devices, err := d.tokens.ListBySubject(role, subjectID)
 	if err != nil {
-		log.Error().Err(err).Int64("customer_id", customerID).Msg("查詢乘客裝置 token 失敗")
+		log.Error().Err(err).Str("role", role).Int64("subject_id", subjectID).
+			Msg("查詢裝置 token 失敗")
 		return
 	}
 	if len(devices) == 0 {
 		return
 	}
 	if err := d.push.SendRideUpdate(ctx, devices, rideID, title, body, data); err != nil {
-		log.Error().Err(err).Int64("customer_id", customerID).Int64("ride_id", rideID).
-			Msg("App 推播行程狀態失敗")
+		log.Error().Err(err).Str("role", role).Int64("subject_id", subjectID).
+			Int64("ride_id", rideID).Msg("App 推播行程狀態失敗")
 	}
 }
 

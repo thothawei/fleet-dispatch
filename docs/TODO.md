@@ -1096,6 +1096,34 @@ admin 取消各驗到一則推播，乘客自己取消驗到**沒有**推播。
 沒有憑證時走 `LogPusher` stub——這條路徑照樣可驗（log 印得出要送給誰、送什麼 data），
 但手機不會真的響。憑證到位後不必再改程式碼。
 
+### U2. 對話訊息推播（2026-07-30，接著同一條地基做）
+
+> 這是 Phase 2 清單上掛了很久的「聊天訊息 FCM 推播（App 被殺時）」。
+> 對話先前**只走 WS**：對方 App 一離開前景 WS 就斷了，訊息只會躺在伺服器上，
+> 要等他自己再打開 App 才看得到——「司機到了要聯絡乘客」「乘客回報遺失物」都因此斷線。
+
+- [x] `Dispatcher` 加 **`NotifyDriverRideUpdate`**（與 `NotifyCustomerRideUpdate` 共用
+      `notifyRideUpdate`，差別只在查哪個角色的裝置）。與 `NotifyDriverRideOffer` 分開，
+      是因為用途不同：那支是派單邀請（要開接單卡），這支是行程進行中的通知。
+- [x] `ChatService.Send` 寫入並發 WS 後，**推給收訊那一方**：乘客發話推司機、司機發話推乘客。
+      **不推給發話者自己的其他裝置**——他知道自己說了什麼，系統匣跳出自己剛送出的訊息
+      只會讓人以為對方回話了。
+- [x] **訊息內容放通知本文、不放 data**（`data` 仍只有 `type`＋`ride_id`）：
+      使用者看得到的就是要看內容，但 App 醒來後仍以 REST 重讀對話拿完整歷史，
+      避免推播裡的那一則與伺服器狀態各說各話。本文以 **rune 計截斷 60 字**——
+      用 byte 截會把中文切成亂碼。
+- [x] **用 `context.Background()` 而非請求的 ctx**：HTTP 回應一送出請求 ctx 就被取消，
+      推播是回應之後才完成的背景動作，掛在請求 ctx 上會被腰斬。
+
+**驗收（2026-07-30 實跑）**：`go test ./internal/service -run TestChatSend_` 三支整合測試
+（真 PostGIS + Redis）通過——推給對方而非發話者、尚未指派司機時不推、未注入 notifier
+仍能發話；另有 `TestPreviewText` 釘住 rune 截斷。
+**反向確認**：拿掉 `pushToRecipient` 呼叫，「推給對方」那支 FAIL（0 則）。
+
+**App 端同批**：`chat.message` 進兩端推播白名單、收到時**只點亮未讀角標**
+（推播 data 沒有訊息本體，餵給 `RideMessage.fromJson` 只會解析失敗被丟掉；
+內容等聊天室自己以 REST 補齊）。
+
 ---
 
 ## 下次任務
@@ -1136,10 +1164,9 @@ admin 取消各驗到一則推播，乘客自己取消驗到**沒有**推播。
 計費地基 **F1–F8＋F3 里程退路＋F9-1~F9-6＋M 整數台幣 已全數合併進 main**，三端對帳與 F3/F9-3/F9-4 皆 docker E2E 驗過。
 其餘皆屬「量體上升後才需」的大資料量最佳化，勿過早做：
 
-1. **協尋/對話 Phase 2 剩餘**：遺失物處理費真金流（目前記帳式確認）；
-   聊天訊息 FCM 推播（App 被殺時）——**送出的地基已在 U 章備妥**
-   （`Dispatcher.NotifyCustomerRideUpdate`），要做的是決定聊天訊息要不要另立一種 data type，
-   以及 App 端收到後怎麼處理（現行白名單只收行程狀態五種）。~~admin 協尋單總覽＋對話稽核 UI~~ ✅ 2026-07-15
+1. **協尋/對話 Phase 2 剩餘**：遺失物處理費真金流（目前記帳式確認）。
+   ~~聊天訊息 FCM 推播（App 被殺時）~~ ✅ **2026-07-30 完成**，見 U2。
+   ~~admin 協尋單總覽＋對話稽核 UI~~ ✅ 2026-07-15
    （後端 H4 `GET /api/admin/lost-items`＋前端 fleet-frontEnd#11）。
 2. **F9-7 rides 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
 3. **drivers／membership 真分頁**：逼近 `MaxListRows=5000` 上限時，比照 rides 改 offset/keyset 伺服器端分頁（含前端）。
