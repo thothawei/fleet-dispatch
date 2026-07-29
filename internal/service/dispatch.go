@@ -432,7 +432,7 @@ func (s *DispatchService) cancelActiveRide(
 	note string,
 ) (string, error) {
 	if ride.Status == constants.RideStatusPickedUp {
-		return "行程已開始，無法取消", nil
+		return "", ErrRideStarted
 	}
 
 	from := ride.Status
@@ -442,7 +442,7 @@ func (s *DispatchService) cancelActiveRide(
 		return "", err
 	}
 	if !ok {
-		return "訂單狀態已變更，無法取消", nil
+		return "", ErrRideStateChanged
 	}
 	s.audit.record(ride.ID, statusPtr(from), constants.RideStatusCancelled,
 		events.TypeRideCancelled, actorRole, actorID, note)
@@ -542,7 +542,7 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		return "", err
 	}
 	if !ok {
-		return "手慢了，這單已被其他司機接走", nil
+		return "", ErrRideTaken
 	}
 
 	ride, err := s.rides.GetByID(rideID)
@@ -552,7 +552,7 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 	}
 	if ride.Status != constants.RideStatusRequested && ride.Status != constants.RideStatusAssigned {
 		s.redis.ReleaseRideLock(ctx, rideID)
-		return "手慢了，這單已被其他司機接走", nil
+		return "", ErrRideTaken
 	}
 
 	driver, err := s.drivers.FindByID(driverID)
@@ -573,7 +573,7 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 	}
 	if driver.Status != constants.DriverStatusIdle {
 		s.redis.ReleaseRideLock(ctx, rideID)
-		return "您目前無法接單（非待命狀態）", nil
+		return "", ErrDriverNotIdle
 	}
 
 	pickupLat, pickupLng, _ := s.rides.GetPickupCoords(rideID)

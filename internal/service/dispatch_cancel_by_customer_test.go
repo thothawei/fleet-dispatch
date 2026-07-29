@@ -75,12 +75,11 @@ func TestCancelByCustomerID_已上車無法取消(t *testing.T) {
 	}
 	ride := newTestRide(t, rides, cust.ID, constants.RideStatusPickedUp)
 
-	msg, err := dispatch.CancelByCustomerID(context.Background(), cust.ID, ride.ID)
-	if err != nil {
-		t.Fatalf("預期無錯誤（以文字訊息拒絕），得到 %v", err)
-	}
-	if msg != "行程已開始，無法取消" {
-		t.Fatalf("預期拒絕訊息，得到 %q", msg)
+	// T1（2026-07-30）：先前這裡回的是 (訊息, nil)，HTTP 層因此送出 200——
+	// 只看有沒有丟例外的客戶端會把「拒絕」當成「取消成功」。改回 sentinel error → 409。
+	_, err = dispatch.CancelByCustomerID(context.Background(), cust.ID, ride.ID)
+	if !errors.Is(err, ErrRideStarted) {
+		t.Fatalf("預期 ErrRideStarted，得到 %v", err)
 	}
 	got, gerr := rides.GetByID(ride.ID)
 	if gerr != nil {

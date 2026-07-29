@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 	"testing"
@@ -305,7 +306,9 @@ func newApprovedDriver(
 	if err := drivers.UpdateStatus(driver.ID, status); err != nil {
 		t.Fatalf("設定司機狀態失敗：%v", err)
 	}
-	if err := drivers.UpdateVehicle(driver.ID, constants.VehicleTypeSedan, "PUSH-01"); err != nil {
+	// 車牌**唯一**：同一個測試裡建兩位司機時，寫死的車牌會被「此車牌已被其他司機使用」擋下。
+	plate := fmt.Sprintf("T-%d", driver.ID)
+	if err := drivers.UpdateVehicle(driver.ID, constants.VehicleTypeSedan, plate); err != nil {
 		t.Fatalf("設定車輛失敗：%v", err)
 	}
 	if err := drivers.UpdateVehicleReview(driver.ID, constants.VehicleReviewApproved, ""); err != nil {

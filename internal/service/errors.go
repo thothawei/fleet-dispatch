@@ -29,4 +29,15 @@ var (
 	ErrVehicleNotPending = errors.New("該司機車輛不在待審核狀態")
 	// ErrRejectNoteRequired O5：退回必須附原因（司機要知道哪裡不對）。
 	ErrRejectNoteRequired = errors.New("退回車輛審核必須填寫原因")
+
+	// 以下四個是「請求本身合法，但當下做不到」——一律 HTTP 409（T1，2026-07-30）。
+	//
+	// **先前這些情況回的是 200 ＋ 一句文案**，於是任何「只看有沒有丟例外」的客戶端
+	// 都會把失敗當成成功：沒搶到的司機拿到一張完整但假的行程卡，開去接一個不存在的乘客；
+	// 乘客按了取消卻什麼也沒發生，畫面上那張單還在。
+	// 文案原樣沿用（LINE 與 App 都直接顯示它），改變的只有狀態碼。
+	ErrRideTaken        = errors.New("手慢了，這單已被其他司機接走")
+	ErrDriverNotIdle    = errors.New("您目前無法接單（非待命狀態）")
+	ErrRideStarted      = errors.New("行程已開始，無法取消")
+	ErrRideStateChanged = errors.New("訂單狀態已變更，無法取消")
 )

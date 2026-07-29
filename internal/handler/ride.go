@@ -154,13 +154,22 @@ func statusForErr(err error) int {
 	return http.StatusConflict
 }
 
-// readStatusForErr 乘客查詢/取消類錯誤對應 HTTP 狀態碼：無權限回 403、找不到回 404、其餘回 500
+// readStatusForErr 乘客查詢/取消類錯誤對應 HTTP 狀態碼：無權限回 403、找不到回 404、
+// 「當下做不到」回 409（T1）、其餘回 500。
+//
+// 409 這一族的文案是要**原樣顯示給乘客**的（「行程已開始，無法取消」），
+// 落到 500 會讓 App 顯示「伺服器發生錯誤」，乘客不知道自己該做什麼。
 func readStatusForErr(err error) int {
 	switch {
 	case errors.Is(err, service.ErrForbidden):
 		return http.StatusForbidden
 	case errors.Is(err, service.ErrNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, service.ErrRideStarted),
+		errors.Is(err, service.ErrRideStateChanged),
+		errors.Is(err, service.ErrRideTaken),
+		errors.Is(err, service.ErrDriverNotIdle):
+		return http.StatusConflict
 	default:
 		return http.StatusInternalServerError
 	}
