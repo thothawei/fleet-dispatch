@@ -164,7 +164,8 @@ Redis 鍵：`drivers:geo`（GEO 位置集合）、`driver:{id}:loc`（最新位�
 - **F9-7 `rides` 月分割**：量體達千萬級時依 `completed_at` 做 declarative partitioning。
 - **`drivers`／`membership_invoices` 真分頁**：逼近 `MaxListRows=5000` 時比照 `rides` 改
   offset/keyset 伺服器端分頁（含前端）。
-- **聊天訊息 FCM 推播**：App 被殺時收不到 `chat.message`（派單推播 A2 已實作）。
+- **聊天訊息 FCM 推播**：App 被殺時收不到 `chat.message`（司機派單 A2 與**乘客行程狀態**
+  推播皆已實作，見 docs/TODO.md「U. 乘客端 App 推播的送出路徑」；缺的只剩聊天這一種）。
 - **F3 強化（可選）**：軌跡稀疏偵測目前用「軌跡 vs 路線取大者」，是否再加
   「後台手動校正單筆車資」待產品定。
 - **評分的營運動作**（B5 下游）：目前三端都只「看得到」評分，**沒有低分司機的處理流程**

@@ -370,6 +370,7 @@ func (s *DispatchService) giveUpIfUnaccepted(rideID int64) {
 		RideID:  rideID,
 		Payload: payload,
 	})
+	notifyCustomerRide(ctx, s.appNotify, ride.CustomerID, rideID, events.TypeRideCancelled)
 }
 
 // giveUpCancelInfo 組出逾時取消的原因、給乘客的文案與 WS payload（P4）。
@@ -454,6 +455,11 @@ func (s *DispatchService) cancelActiveRide(
 		Type:   events.TypeRideCancelled,
 		RideID: ride.ID,
 	})
+	// 乘客自己按的取消**不推播**：他人就在 App 前景、剛剛才按下去，
+	// 系統匣再跳一則「行程已取消」只是噪音。admin／系統取消才需要推。
+	if actorRole != events.ActorCustomer {
+		notifyCustomerRide(ctx, s.appNotify, ride.CustomerID, ride.ID, events.TypeRideCancelled)
+	}
 
 	// 若已派給司機，通知司機。
 	//
@@ -516,6 +522,7 @@ func (s *DispatchService) CancelByDriver(ctx context.Context, rideID, driverID i
 		Type:   events.TypeRideRedispatched,
 		RideID: rideID,
 	})
+	notifyCustomerRide(ctx, s.appNotify, ride.CustomerID, rideID, events.TypeRideRedispatched)
 	return "已放棄此訂單", nil
 }
 
@@ -605,6 +612,7 @@ func (s *DispatchService) AcceptRide(ctx context.Context, rideID, driverID int64
 		RideID:  rideID,
 		Payload: rideAcceptedCustomerPayload(driver, etaSec),
 	})
+	notifyCustomerRide(ctx, s.appNotify, ride.CustomerID, rideID, events.TypeRideAccepted)
 	// 沒搶到的司機：把他們的接單卡收掉（T2）。必須在接單者的 ride.accepted 之外另送，
 	// 因為 ride.accepted 的收件人是「接到的那位」。
 	s.notifyOfferedDrivers(ctx, rideID, events.TypeRideTaken, driverID)
