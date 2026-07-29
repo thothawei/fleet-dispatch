@@ -142,29 +142,43 @@ func (s *RideStopService) mark(driverID, rideID, stopID int64, do func(int64) (b
 	if !ok {
 		return ErrStopAlreadyHandled // 已到達或已跳過，不覆寫
 	}
-	s.publishStops(ride.ID, ride.CustomerID)
+	s.publishStops(ride)
 	return nil
 }
 
-// publishStops 把**整趟**最新停靠點推給乘客（司機端剛做完動作、會自己重讀 active）。
+// publishStops 把**整趟**最新停靠點推給乘客**與司機**。
 //
-// 帶整批而非單一 stop：乘客端收到直接覆蓋即可，不必在客戶端套用差異，
+// 帶整批而非單一 stop：收到直接覆蓋即可，不必在客戶端套用差異，
 // 也不怕漏收某一則事件後狀態就永遠對不上。
 // 讀失敗／未注入 publisher 都不影響標記本身——標記已經寫進 DB 了。
-func (s *RideStopService) publishStops(rideID, customerID int64) {
+//
+// **司機也要收**：原本的理由是「司機端剛做完動作、會自己重讀 active」，
+// 但那假設了只有一台裝置。同一位司機的第二台裝置（或 LINE 那條路徑）
+// 標記時，這台不會重讀，畫面會停在舊的「下一站」——而「下一站」正是
+// 司機端唯一給操作的那一站，兩台會對不同的站給按鈕。
+// 動作的來源那台會多收到一則自己造成的事件（它已經重讀過了），
+// 那是一次多餘的重讀，遠比兩台狀態不一致便宜。
+func (s *RideStopService) publishStops(ride *model.Ride) {
 	if s.publisher == nil {
 		return
 	}
-	stops, err := s.stops.ListByRide(rideID)
+	stops, err := s.stops.ListByRide(ride.ID)
 	if err != nil {
 		return
 	}
+	ev := events.Event{
+		Type:    events.TypeRideStopUpdated,
+		RideID:  ride.ID,
+		Payload: map[string]any{"stops": stopViews(stops)},
+	}
 	s.publisher.Publish(
-		events.Recipient{Role: events.RoleCustomer, ID: customerID},
-		events.Event{
-			Type:    events.TypeRideStopUpdated,
-			RideID:  rideID,
-			Payload: map[string]any{"stops": stopViews(stops)},
-		},
+		events.Recipient{Role: events.RoleCustomer, ID: ride.CustomerID},
+		ev,
 	)
+	if ride.DriverID != nil {
+		s.publisher.Publish(
+			events.Recipient{Role: events.RoleDriver, ID: *ride.DriverID},
+			ev,
+		)
+	}
 }

@@ -79,12 +79,21 @@ func TestMarkArrived_推ride_stop_updated給乘客(t *testing.T) {
 	if err := f.svc.MarkArrived(f.driverID, f.rideID, f.stopIDs[0]); err != nil {
 		t.Fatalf("標記到達失敗：%v", err)
 	}
-	if f.pub.count() != 1 {
-		t.Fatalf("預期推 1 則事件，得到 %d", f.pub.count())
+	// 乘客與司機各一則：司機的第二台裝置／LINE 那條路徑標記時，
+	// 沒收到事件的那台會停在舊的「下一站」，而那正是唯一給操作的一站。
+	if f.pub.count() != 2 {
+		t.Fatalf("預期推 2 則事件（乘客＋司機），得到 %d", f.pub.count())
 	}
 	got := f.pub.recv[0]
 	if got.Rec.Role != events.RoleCustomer || got.Rec.ID != f.customerID {
-		t.Errorf("事件要送給本趟乘客，得到 %+v", got.Rec)
+		t.Errorf("第一則要送給本趟乘客，得到 %+v", got.Rec)
+	}
+	drv := f.pub.recv[1]
+	if drv.Rec.Role != events.RoleDriver || drv.Rec.ID != f.driverID {
+		t.Errorf("第二則要送給本趟司機，得到 %+v", drv.Rec)
+	}
+	if drv.Ev.Type != events.TypeRideStopUpdated || drv.Ev.RideID != f.rideID {
+		t.Errorf("司機那則的型別／ride_id 不符：%+v", drv.Ev)
 	}
 	if got.Ev.Type != events.TypeRideStopUpdated || got.Ev.RideID != f.rideID {
 		t.Errorf("事件型別／ride_id 不符：%+v", got.Ev)
@@ -108,8 +117,8 @@ func TestMarkSkipped_也要推事件(t *testing.T) {
 	if err := f.svc.MarkSkipped(f.driverID, f.rideID, f.stopIDs[0]); err != nil {
 		t.Fatalf("標記跳過失敗：%v", err)
 	}
-	if f.pub.count() != 1 {
-		t.Fatalf("預期推 1 則事件，得到 %d", f.pub.count())
+	if f.pub.count() != 2 {
+		t.Fatalf("預期推 2 則事件（乘客＋司機），得到 %d", f.pub.count())
 	}
 	stops := f.pub.recv[0].Ev.Payload["stops"].([]map[string]any)
 	if _, ok := stops[0]["skipped_at"]; !ok {
@@ -128,8 +137,8 @@ func TestMark_失敗時不推事件(t *testing.T) {
 	if err := f.svc.MarkArrived(f.driverID, f.rideID, f.stopIDs[0]); err == nil {
 		t.Fatal("重複標記應回錯誤")
 	}
-	if f.pub.count() != 1 {
-		t.Fatalf("失敗的標記不該推事件，總共推了 %d 則", f.pub.count())
+	if f.pub.count() != 2 {
+		t.Fatalf("失敗的標記不該再推事件（只該有第一次的乘客＋司機共 2 則），總共推了 %d 則", f.pub.count())
 	}
 }
 
