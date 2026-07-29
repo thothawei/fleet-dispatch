@@ -37,6 +37,9 @@ jobs:
       - name: Unit tests (no Docker)
         # repository/redis/service 內含 testcontainers 整合測；CI 不啟 Docker，
         # 只跑純單元包＋service 中明確不碰 DB 的測試名。
+        #
+        # ⚠️ 這串 -run 是**手動維護的白名單**：service 裡新增的純單元測試如果沒加進來，
+        # CI 綠燈**不代表它跑過**（本機有 Docker 才會跑到）。新增測試時記得補這一行。
         run: |
           CGO_ENABLED=0 go test -count=1 -timeout 60s \
             ./cmd/server/ \
@@ -50,4 +53,4 @@ jobs:
             ./internal/notify/ \
             ./internal/util/
           CGO_ENABLED=0 go test -count=1 -timeout 60s ./internal/service/ \
-            -run 'TestRideAuditor_|TestStatusPtrHelpers|TestEventTypeConstants_|TestDeviceTokenService_|TestValidatePickup|TestValidateOptional|TestRideAssignedPayload_|TestRideAcceptedDriverPayload_|TestFormatETA|TestDispatcher_|TestBillableDistanceM|TestQuote'
+            -run 'TestRideAuditor_|TestStatusPtrHelpers|TestEventTypeConstants_|TestDeviceTokenService_|TestValidatePickup|TestValidateOptional|TestRideAssignedPayload_|TestRideAcceptedDriverPayload_|TestFormatETA|TestDispatcher_|TestBillableDistanceM|TestQuote|TestCustomerPushCopy_|TestCustomerRidePushData_|TestNotifyCustomerRide_|TestPreviewText|TestLostItemPushTitle|TestRideOfferPushData'
