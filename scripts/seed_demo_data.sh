@@ -15,6 +15,11 @@
 #   SEED_USER   示範乘客的 line_user_id（預設 demo-customer-1）
 #   SEED_PASS   密碼（預設 demo123456）
 #   PSQL_DSN    psql 連線字串；未設時跳過 dispatched／failed 那兩筆
+#
+# 重複執行：常用地點是覆蓋（home／work 是插槽），**但預約會累積**——
+# 每跑一次就多四筆。要乾淨重來的話先清掉：
+#   DELETE FROM scheduled_rides WHERE customer_id = (
+#     SELECT id FROM customers WHERE line_user_id = 'demo-customer-1');
 set -e
 
 API="${API_URL:-http://localhost:8080}"
