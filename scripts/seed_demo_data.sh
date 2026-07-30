@@ -70,9 +70,11 @@ curl -s -H "$AUTH" "$API/api/customer/places" | head -c 400; echo
 # ---------- 預約行程（pending，走 API）----------
 # 時間一律用「相對現在」算，腳本才不會過幾天就因為時間變成過去而全部被擋下來。
 iso_in() {
-  # $1 = 幾分鐘後
+  # $1 = 幾分鐘後。
+  # BSD date（macOS）走 -v，GNU date（Linux）走 -d。
+  # **只在 macOS 上實跑過**，GNU 那條退路是照文件寫的、未實測。
   if date -u -v+"$1"M '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null; then :; else
-    date -u -d "+$1 minutes" '+%Y-%m-%dT%H:%M:%SZ'   # GNU date 退路
+    date -u -d "+$1 minutes" '+%Y-%m-%dT%H:%M:%SZ'
   fi
 }
 
@@ -94,7 +96,6 @@ schedule 90   25.0261 121.5435 "台北市大安區和平東路二段106號" 25.0
 schedule 1500 25.0797 121.5750 "台北市內湖區瑞光路513巷" 25.0261 121.5435 "台北市大安區和平東路二段106號" "" "下班回家"
 # 三天後：帶寵物（指定寵物車，驗清潔費那條路徑）
 schedule 4320 25.0261 121.5435 "台北市大安區和平東路二段106號" 25.0330 121.5654 "台北市信義區市府路1號" "pet" "帶柴犬看醫生"
-CANCEL_TARGET="$LAST_SCHEDULE_ID"
 # 一週後：要拿來示範「已取消」
 schedule 10080 25.0400 121.5680 "台北市信義區松高路12號" 25.0210 121.4700 "新北市板橋區文化路一段188號" "" "週末回娘家"
 TO_CANCEL="$LAST_SCHEDULE_ID"
