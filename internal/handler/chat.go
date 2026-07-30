@@ -57,12 +57,17 @@ func (h *ChatHandler) Send(c *gin.Context) {
 	}
 	var req struct {
 		Body string `json:"body"`
+		// ClientMsgID 客戶端產生的冪等鍵（選填）。帶同一個鍵重送會拿回既有那筆訊息，
+		// 不會多出一則——App 送出逾時後就是靠它安全重試（見 ChatService.SendWithClientID）。
+		ClientMsgID string `json:"client_msg_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "參數錯誤"})
 		return
 	}
-	msg, err := h.chat.Send(role, middleware.SubjectIDFromCtx(c), rideID, req.Body)
+	msg, err := h.chat.SendWithClientID(
+		role, middleware.SubjectIDFromCtx(c), rideID, req.Body, req.ClientMsgID,
+	)
 	if err != nil {
 		c.JSON(chatStatusForErr(err), gin.H{"error": err.Error()})
 		return
@@ -73,7 +78,8 @@ func (h *ChatHandler) Send(c *gin.Context) {
 // chatStatusForErr 對話錯誤對應 HTTP 狀態碼。
 func chatStatusForErr(err error) int {
 	switch {
-	case errors.Is(err, service.ErrEmptyMessage), errors.Is(err, service.ErrMessageTooLong):
+	case errors.Is(err, service.ErrEmptyMessage), errors.Is(err, service.ErrMessageTooLong),
+		errors.Is(err, service.ErrClientMsgIDTooLong):
 		return http.StatusBadRequest
 	default:
 		return readStatusForErr(err)
