@@ -1313,8 +1313,9 @@ POST          /api/customer/scheduled-rides/:id/cancel
 
 ### W6. 驗收
 
-`go build`／`go vet` 乾淨；`internal/service` 新增 15 支測試（真 PostGIS 容器）全綠，
-另加 `scheduled_ride_route_shape_test.go`——新路由與既有 `/customer/rides/:id` 同層混用
+`go build`／`go vet` 乾淨；`internal/service` **完整套件 172 支全過、0 失敗**
+（`ok ... 2911.952s`，真 PostGIS 容器，本機跑了 48 分鐘），其中 17 支是這批新增的；
+`internal/handler` 完整套件也綠（136s）。另加 `scheduled_ride_route_shape_test.go`——新路由與既有 `/customer/rides/:id` 同層混用
 靜態段與參數段，gin 的路由衝突是**註冊當下 panic**：服務起不來但單元測試照樣全綠。
 
 **反向驗證做了三次，其中兩次推翻了自己的假設**：
