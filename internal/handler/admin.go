@@ -608,6 +608,25 @@ func (h *AdminHandler) MarkMembershipInvoicePaid(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"id": id, "paid": *req.Paid})
 }
 
+// adminCancelStatus 後台強制取消的錯誤 → HTTP 狀態碼。
+//
+// 「當下做不到」是**狀態衝突（409）**，不是伺服器故障——與乘客端 `readStatusForErr` 同一條規則。
+// 這裡原本一律回 500，而這兩種都是後台每天會遇到的正常情況：
+// 已上車無法取消（確認對話框自己就寫著這句），以及**上一次其實已經取消成功**
+// （回應在網路上遺失、操作者又按了一次）。回 500 有兩個實際後果：
+// 監控把例行操作當成伺服器故障，而前端無從分辨「伺服器壞了」與
+// 「這件事已經生效了，重讀一次就對了」——後者正是它該自動重新整理的訊號。
+func adminCancelStatus(err error) int {
+	switch {
+	case errors.Is(err, service.ErrNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrRideStarted), errors.Is(err, service.ErrRideStateChanged):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
 // CancelRide POST /api/admin/rides/:id/cancel — 後台強制取消
 func (h *AdminHandler) CancelRide(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
@@ -617,12 +636,11 @@ func (h *AdminHandler) CancelRide(c *gin.Context) {
 	}
 	msg, err := h.adminOps.CancelRideByAdmin(c.Request.Context(), id)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrNotFound):
+		if errors.Is(err, service.ErrNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "找不到訂單"})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
 		}
+		c.JSON(adminCancelStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": msg})
