@@ -1250,7 +1250,141 @@ FCM／APNs token 是「這台裝置上的這個 App」的識別，換人登入�
 
 ---
 
+## 🗓️ W. 預約行程＋常用地點（2026-07-31，跨端新功能）
+
+> 需求：乘客可**預約未來的用車**，以及存下住家／公司等常去的地點供叫車與預約一鍵帶入。
+> App 端對應 [line-fleet-app PR #95](https://github.com/thothawei/fleet-app/pull/95)。
+
+### W1. 兩張新表（migration 000025／000026）
+
+- `customer_saved_places`：`kind`（home／work／custom）＋`label`／`address`／`point`。
+  **home／work 每人各限一筆**（部分唯一索引 `uq_saved_place_customer_kind`），服務層為
+  **upsert 語意**——「設定住家」該把住家換成新地址，不是回一句「你已經有住家了」。
+- `scheduled_rides`：`scheduled_at`＋起訖點＋`status`（pending／dispatched／cancelled／failed）
+  ＋`ride_id`（轉單後指向真訂單）＋`attempt_count`／`last_error`。
+
+**為什麼不是在 `rides` 加一個 `scheduled` 狀態**：`rides` 的查詢散布在派單池
+（`status='requested'`）、乘客 active、歷史、報表、admin 訂單列表——多塞一個「還不該被派單」
+的狀態進去，得逐一稽核每支查詢有沒有排除它，漏一支就是「司機看到一張三天後的單」。
+獨立表對既有路徑是純新增、零風險。
+
+### W2. 到點轉單（`ScheduledRideDispatcher`）
+
+每 30 秒掃一次，把約定時間前 **15 分鐘**（`ScheduledRideLeadMinutes`）內的 pending 轉成真訂單。
+**轉單走的是與手動叫車完全同一支 `RideService.CreateByCustomer`**——派單、審計、車種驗證、
+「同時只能有一張進行中訂單」全部自動沿用。另寫一份建單邏輯的話，兩條路徑遲早長歪，
+而且是預約那條先歪（沒人在旁邊看著）。
+
+| 機制 | 防的是什麼 |
+|---|---|
+| 認領帶 `attempt_count` 樂觀鎖 | 多副本同時掃到同一筆 → 建出**兩張**要付錢的訂單 |
+| 暫時性失敗維持 pending（上限 10 次） | 乘客當下還在另一趟行程上，那是「等下一輪」不是「永久失敗」 |
+| 永久性失敗立刻判死 | 座標／車種無效重試幾次都一樣，佔著額度只會讓乘客到約定時間才發現沒車 |
+| 過期 30 分鐘就作廢（`ScheduledRideExpiryGraceMinutes`） | **停機後重啟**會把積壓的過期預約全部派車（見 W4） |
+
+### W3. 端點（皆掛 `customerAuthed`）
+
+```
+GET/POST      /api/customer/places
+PUT/DELETE    /api/customer/places/:id
+GET/POST      /api/customer/scheduled-rides        # ?upcoming=1 只回未轉單；回應帶 lead_minutes
+GET           /api/customer/scheduled-rides/:id
+POST          /api/customer/scheduled-rides/:id/cancel
+```
+
+**取消已轉單的回 409＋該筆現況**（不是單純的錯誤）：那張真訂單已經在派單池裡，
+司機可能正在開過來——App 要據此把畫面切成「已為你派車」並引導去取消訂單，
+而不是顯示「取消失敗，請稍後再試」（同一個病在 V 那章的 admin 端抓過一次）。
+
+### W4. 本批 debug 抓到的：停機後會把積壓的過期預約全部派車
+
+`FindDue` 原本只有上界沒有下界。部署／當機／DB 不可用停了一段時間，重啟時
+**昨天早上的預約會今天下午開一台車到乘客家樓下**，而且他還得付那趟錢。
+修法是超過約定時間 30 分鐘就標 `failed` 並寫原因——標 failed 而不是留在 pending，
+是因為留著它會永遠掛在乘客的「即將到來」，而那台車永遠不會來。
+先寫 `TestDispatcherSkipsLongExpiredSchedules` 取證看到它真的被轉單，才動手修。
+
+### W5. 假資料
+
+`scripts/seed_demo_data.sh`（示範乘客 `demo-customer-1`／`demo123456`）。
+**主路徑刻意走真實 HTTP API 而不是直接寫 DB**——塞資料的同時就端到端驗過了那些端點，
+不會塞出一份「只有 SQL 造得出來、API 其實不接受」的資料。
+只有 `dispatched`／`failed` 非走 SQL 不可（排程器到點後才會產生，沒有 API 建得出來）。
+
+### W6. 驗收
+
+`go build`／`go vet` 乾淨；`internal/service` **完整套件 172 支全過、0 失敗**
+（`ok ... 2911.952s`，真 PostGIS 容器，本機跑了 48 分鐘），其中 17 支是這批新增的；
+`internal/handler` 完整套件也綠（136s）。另加 `scheduled_ride_route_shape_test.go`——新路由與既有 `/customer/rides/:id` 同層混用
+靜態段與參數段，gin 的路由衝突是**註冊當下 panic**：服務起不來但單元測試照樣全綠。
+
+**反向驗證做了三次，其中兩次推翻了自己的假設**：
+拔掉 `FindDue` 的時間條件 → `TestDispatcherOnlyPicksDueSchedules` 轉紅 ✅；
+拔掉樂觀鎖 → `TestDispatcherIsIdempotent` **仍然綠**（它守的是循序重跑，第一輪改了狀態
+第二輪就撈不到，壓根沒走到認領那行）；補的併發測試**第一版也是假的**（兩個 goroutine
+各跑一次 `Tick`，先跑完的已改狀態，拔掉樂觀鎖連跑三次都綠），
+改成餵兩份 `attempt_count=0` 的相同快照直接進 `dispatchOne` 才造得出真重疊 ✅。
+
+### W6-1. 到點轉單的真環境實跑（2026-07-31，本機後端＋PostGIS）
+
+不只有測試，整條在跑著的服務上驗過一次。塞一筆 5 分鐘後到點的預約（`id=7`），
+排程器每 30 秒一輪，觀察到的軌跡：
+
+| 輪次 | `attempt_count` | 結果 |
+|---|---|---|
+| 1–2 | 1 → 2 | 撈到並認領，建單被 `已有進行中的訂單` 擋下 → **維持 pending**、寫 `last_error`、等下一輪 |
+| 3（把擋路的示範訂單結掉之後） | 3 | **轉單成功**：`status=dispatched`、`ride_id=39`、`last_error` 清空 |
+
+交叉驗證訂單 39：`pickup_address`／`dropoff_address` 正是預約上填的那兩個字串，
+`status=0`（requested，已進派單池）。
+
+**這一跑同時證明了三件本來只有測試層證據的事**：到期條件真的撈得到、
+暫時性失敗真的是「等下一輪」而不是判死、以及成功後 `last_error` 真的會被清掉。
+順帶驗到 gin 路由沒有 panic（服務起得來），那是單元測試照樣全綠的失敗模式。
+
+### W7. 這批沒做的（寫明條件）
+
+- **預約不支援多停靠點**：需要另一張 stops 快照表，而「預約一趟多人共乘」的需求還沒出現。
+- **預約沒有專屬推播**：轉單後走既有 ride 推播鏈路（「司機接單了」照樣會通知），
+  缺的是「你的預約已轉為訂單」與「預約失敗」這兩則本身。
+  **條件**：等 `failed` 真的在生產環境發生過再決定值不值得。
+- **admin 看不到預約**：表與 API 都在，admin UI 沒做。等營運說得出要對預約做什麼再開。
+- **司機端不知道自己接的是預約單**（自審時發現，本批刻意沒做）：轉單後就是一張普通訂單，
+  司機看不到「約定上車時間」。提前量 15 分鐘下多半剛好，但司機若 5 分鐘就到，
+  乘客可能還沒下樓，而司機不知道該等。要做的話動的是 `rides`
+  （帶 `scheduled_at` 或來源標記）＋司機端顯示，屬功能擴充不是 bug，故沒夾帶進這批。
+  **條件**：等實際跑過幾趟預約單、司機真的回報「到太早不知道要不要等」再做。
+
 ## 下次任務
+
+> **🎯 2026-07-31 這一輪（W. 預約行程＋常用地點）——開工先看這段**
+>
+> 跨端新功能，不是 debug 輪：兩張新表（migration 000025／000026）、9 支端點、
+> 一支到點轉單的背景排程器。PR [#70](https://github.com/thothawei/fleet-dispatch/pull/70)
+> ＋ App 端 [fleet-app #95](https://github.com/thothawei/fleet-app/pull/95)。
+> 決策理由與三次反向驗證的結果見上方 W 章。
+>
+> **這一輪學到的兩條**：
+> 1. **綠燈的測試不等於守得住的測試**。名字叫 `TestDispatcherIsIdempotent` 的那支，
+>    把認領的樂觀鎖整個拔掉照樣綠（它守的是循序重跑，壓根沒走到認領那行）；
+>    補的併發測試第一版也是假的（兩個 goroutine 沒真重疊）。
+>    **判準：把防線拔掉，測試會不會紅**——不會紅的那支，它的名字在說謊。
+>    競態測試還要多問：**重疊是造出來的，還是碰運氣？**
+> 2. **本機跑 `go test ./...` 跑不完**（`internal/service` 有 172 支、每支起一個 PostGIS
+>    容器，約一小時）。要驗改動請跑**受影響的 package**，別跑全部——
+>    這條先前記在坑卡上，這一輪再次踩到（等了 90 分鐘才發現它只是慢不是卡）。
+>    CI 那支 `build-and-unit-test` 只花 1 分鐘，是因為 CI 環境跳過 testcontainers，
+>    **它綠不代表整合測試綠**。
+>
+> **➡️ 下一輪候選**（都寫明了條件，別提前做）：
+> 1. **預約的通知缺口**——轉單後走既有 ride 推播鏈路（「司機接單了」會通知），
+>    但「你的預約已轉為訂單」與「預約失敗」這兩則本身沒有。
+>    **條件**：等 `failed` 真的在生產環境發生過。
+> 2. **admin 端看不到預約**——表與 API 都在，UI 沒做。
+>    **條件**：等營運說得出要對預約做什麼（強制取消？改時間？）。
+> 3. **司機端不知道自己接的是預約單**（自審發現）——見 W7。
+>    **條件**：等司機真的回報「到太早不知道要不要等」。
+
 
 > **🎯 2026-07-30 這一輪做完了什麼（開工先看這段）**
 >

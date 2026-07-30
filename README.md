@@ -86,6 +86,10 @@ docker compose --profile simulator up -d simulator
 | GET  | `/api/rides/:id/lost-items` | 查該行程最新協尋單（本趟乘客/司機/admin） |
 | GET  | `/api/customer/lost-items`、`/api/driver/lost-items` | 乘客／司機的未結案協尋清單 |
 | POST | `/api/lost-items/:id/found` `pay` `return` `close` | 協尋狀態機：司機尋獲→乘客付處理費→司機歸還；未尋獲可結案 |
+| GET/POST | `/api/customer/places`、`PUT/DELETE /api/customer/places/:id` | 常用地點（住家／公司／自訂）；`kind=home/work` 每人各限一筆且為**覆蓋語意** |
+| GET/POST | `/api/customer/scheduled-rides` | 預約行程：清單（`?upcoming=1` 只回未轉單）／建立；回應帶 `lead_minutes` |
+| GET  | `/api/customer/scheduled-rides/:id` | 單筆預約（取消撞 409 後用來重讀現況） |
+| POST | `/api/customer/scheduled-rides/:id/cancel` | 取消預約；**已轉單回 409＋該筆現況**（那張真訂單已在派單池，不能宣稱取消成功） |
 | GET  | `/liff/` | 司機 LIFF 定位頁 |
 
 **後台 `/api/admin/*`**（帳密登入，角色 viewer/dispatcher/superadmin）：

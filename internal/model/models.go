@@ -358,3 +358,53 @@ type RideEvent struct {
 func (RideEvent) TableName() string {
 	return "ride_events"
 }
+
+// CustomerSavedPlace 乘客的常用地點（住家／公司／自訂）。
+//
+// Kind 是語意插槽（constants.SavedPlaceKind*），home／work 每人各限一筆；
+// Label 只是顯示名稱，使用者可改——判斷「這是不是住家」一律看 Kind，別比對 Label。
+type CustomerSavedPlace struct {
+	ID         int64     `gorm:"primaryKey" json:"id"`
+	CustomerID int64     `gorm:"column:customer_id;not null" json:"customer_id"`
+	Kind       string    `gorm:"not null;default:'custom'" json:"kind"`
+	Label      string    `gorm:"not null" json:"label"`
+	Address    string    `gorm:"not null" json:"address"`
+	Point      GeoPoint  `gorm:"column:point;type:geography(Point,4326);not null" json:"point"`
+	CreatedAt  time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt  time.Time `gorm:"not null" json:"updated_at"`
+}
+
+func (CustomerSavedPlace) TableName() string {
+	return "customer_saved_places"
+}
+
+// ScheduledRide 預約行程：到點前由排程器轉成真訂單（RideID）進派單池。
+//
+// 這張表刻意與 rides 分離——它在轉單之前**不是訂單**，不該出現在派單池、乘客 active、
+// 報表或 admin 訂單列表裡（見 migration 000026 的說明）。
+type ScheduledRide struct {
+	ID             int64     `gorm:"primaryKey" json:"id"`
+	CustomerID     int64     `gorm:"column:customer_id;not null" json:"customer_id"`
+	ScheduledAt    time.Time `gorm:"column:scheduled_at;not null" json:"scheduled_at"`
+	PickupPoint    GeoPoint  `gorm:"column:pickup_point;type:geography(Point,4326);not null" json:"pickup_point"`
+	PickupAddress  string    `gorm:"column:pickup_address;not null;default:''" json:"pickup_address"`
+	DropoffPoint   *GeoPoint `gorm:"column:dropoff_point;type:geography(Point,4326)" json:"dropoff_point"`
+	DropoffAddress string    `gorm:"column:dropoff_address;not null;default:''" json:"dropoff_address"`
+	// RequiredVehicleType 與 rides 同一組 code；'' ＝不指定車種。
+	RequiredVehicleType string `gorm:"column:required_vehicle_type;not null;default:''" json:"required_vehicle_type"`
+	Note                string `gorm:"not null;default:''" json:"note"`
+	Status              string `gorm:"not null;default:'pending'" json:"status"`
+	// RideID 轉單後指向那張真訂單；pending／cancelled／failed 時為 nil。
+	RideID *int64 `gorm:"column:ride_id" json:"ride_id"`
+	// AttemptCount／LastError 轉單重試的痕跡：到點時乘客可能還在別的行程上，
+	// 那是「等下一輪」而不是「永久失敗」，重試上限見 constants.ScheduledRideMaxAttempts。
+	AttemptCount int        `gorm:"column:attempt_count;not null;default:0" json:"attempt_count"`
+	LastError    string     `gorm:"column:last_error;not null;default:''" json:"last_error"`
+	DispatchedAt *time.Time `gorm:"column:dispatched_at" json:"dispatched_at"`
+	CreatedAt    time.Time  `gorm:"not null" json:"created_at"`
+	UpdatedAt    time.Time  `gorm:"not null" json:"updated_at"`
+}
+
+func (ScheduledRide) TableName() string {
+	return "scheduled_rides"
+}

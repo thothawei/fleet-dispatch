@@ -77,6 +77,8 @@ func main() {
 	rideStopRepo := repository.NewRideStopRepository(db)
 	lostItemRepo := repository.NewLostItemRepository(db)
 	rideRatingRepo := repository.NewRideRatingRepository(db)
+	savedPlaceRepo := repository.NewSavedPlaceRepository(db)
+	scheduledRideRepo := repository.NewScheduledRideRepository(db)
 
 	// 軌跡分區維護：啟動時預建未來月分區 + 每日排程（避免跨月寫入失敗）
 	if err := trackRepo.EnsureTrackPartitions(cfg.TrackPartitionMonthsAhead); err != nil {
@@ -177,6 +179,14 @@ func main() {
 	lostItemService := service.NewLostItemService(rideRepo, lostItemRepo, feeSettings, hub)
 	// 協尋推播：這條流程是小時級的，雙方幾乎都不在 App 前景，只靠 WS 等於沒有通知。
 	lostItemService.SetAppNotifier(appNotify)
+	savedPlaceService := service.NewSavedPlaceService(savedPlaceRepo)
+	scheduledRideService := service.NewScheduledRideService(scheduledRideRepo)
+
+	// 預約行程排程器：到點前把預約轉成真訂單，走的是與手動叫車同一支 CreateByCustomer。
+	scheduledDispatcher := service.NewScheduledRideDispatcher(scheduledRideRepo, rideService)
+	scheduledCtx, stopScheduled := context.WithCancel(context.Background())
+	defer stopScheduled()
+	go scheduledDispatcher.Run(scheduledCtx)
 
 	if cfg.AppEnv == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -202,6 +212,8 @@ func main() {
 	wsHandler := handler.NewWSHandler(hub, cfg.JWTSecret, cfg.WSWriteWaitSec, cfg.WSPongWaitSec, cfg.WSMaxMessageBytes)
 	chatHandler := handler.NewChatHandler(chatService)
 	lostItemHandler := handler.NewLostItemHandler(lostItemService)
+	savedPlaceHandler := handler.NewSavedPlaceHandler(savedPlaceService)
+	scheduledRideHandler := handler.NewScheduledRideHandler(scheduledRideService)
 
 	// 後台：管理員 repo/service/handler，並依環境變數種一個管理員（僅在尚無 admin 時）
 	adminRepo := repository.NewAdminRepository(db)
@@ -262,6 +274,16 @@ func main() {
 			customerAuthed.POST("/rides/:id/lost-items", lostItemHandler.CreateByCustomer)
 			customerAuthed.GET("/customer/lost-items", lostItemHandler.ListByCustomer)
 			customerAuthed.POST("/lost-items/:id/pay", lostItemHandler.Pay)
+			// 常用地點：住家／公司／自訂，供叫車與預約一鍵帶入起訖點。
+			customerAuthed.GET("/customer/places", savedPlaceHandler.List)
+			customerAuthed.POST("/customer/places", savedPlaceHandler.Create)
+			customerAuthed.PUT("/customer/places/:id", savedPlaceHandler.Update)
+			customerAuthed.DELETE("/customer/places/:id", savedPlaceHandler.Delete)
+			// 預約行程：到點前由 ScheduledRideDispatcher 轉成真訂單。
+			customerAuthed.GET("/customer/scheduled-rides", scheduledRideHandler.List)
+			customerAuthed.POST("/customer/scheduled-rides", scheduledRideHandler.Create)
+			customerAuthed.GET("/customer/scheduled-rides/:id", scheduledRideHandler.Get)
+			customerAuthed.POST("/customer/scheduled-rides/:id/cancel", scheduledRideHandler.Cancel)
 		}
 
 		// 受 JWT 保護：司機操作（driver_id 取自 token，不信任 body）
