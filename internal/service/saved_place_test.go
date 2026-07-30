@@ -181,3 +181,51 @@ func TestSavedPlaceValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestSavedPlaceLimit 常用地點數達上限後不能再新增，但**插槽仍可覆蓋**。
+//
+// 覆蓋不會增加筆數，所以「已達上限就連住家都不能改」會是個很怪的死結。
+func TestSavedPlaceLimit(t *testing.T) {
+	db := newServiceTestDB(t)
+	customers := repository.NewCustomerRepository(db)
+	svc := NewSavedPlaceService(repository.NewSavedPlaceRepository(db))
+
+	me, err := customers.FindOrCreateByLineUserID("U_place_limit", "上限乘客")
+	if err != nil {
+		t.Fatalf("建立乘客失敗：%v", err)
+	}
+
+	// 先塞一個住家，其餘用 custom 填滿。
+	if _, err := svc.Create(me.ID, SavePlaceInput{
+		Kind: constants.SavedPlaceKindHome, Address: "舊家", Lat: 25.0, Lng: 121.5,
+	}); err != nil {
+		t.Fatalf("建立住家失敗：%v", err)
+	}
+	for i := 1; i < maxPlacesPerCustomer; i++ {
+		if _, err := svc.Create(me.ID, SavePlaceInput{
+			Kind:    constants.SavedPlaceKindCustom,
+			Label:   "地點" + string(rune('A'+i%26)) + string(rune('0'+i/26)),
+			Address: "某地址", Lat: 25.0, Lng: 121.5,
+		}); err != nil {
+			t.Fatalf("第 %d 筆就失敗了：%v", i+1, err)
+		}
+	}
+
+	if _, err := svc.Create(me.ID, SavePlaceInput{
+		Kind: constants.SavedPlaceKindCustom, Label: "再一個", Address: "某地址",
+		Lat: 25.0, Lng: 121.5,
+	}); !errors.Is(err, ErrTooManyPlaces) {
+		t.Fatalf("超過上限應回 ErrTooManyPlaces，得到 %v", err)
+	}
+
+	// 插槽覆蓋不增加筆數，所以即使已達上限也該成功。
+	updated, err := svc.Create(me.ID, SavePlaceInput{
+		Kind: constants.SavedPlaceKindHome, Address: "新家", Lat: 25.1, Lng: 121.6,
+	})
+	if err != nil {
+		t.Fatalf("已達上限時覆蓋住家仍應成功，得到 %v", err)
+	}
+	if updated.Address != "新家" {
+		t.Fatalf("住家沒被覆蓋：%+v", updated)
+	}
+}

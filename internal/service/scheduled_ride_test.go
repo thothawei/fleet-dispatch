@@ -210,3 +210,48 @@ func TestScheduledRideList(t *testing.T) {
 		t.Fatalf("全部應有 3 筆，得到 %d", len(all))
 	}
 }
+
+// TestScheduledRideLimit 未完成的預約數達上限後不能再建。
+//
+// 沒有上限的清單遲早會被腳本灌爆；而且乘客端的「即將到來」是一份要全部渲染的清單，
+// 幾百筆會讓那個畫面直接不能用。
+func TestScheduledRideLimit(t *testing.T) {
+	db := newServiceTestDB(t)
+	customers := repository.NewCustomerRepository(db)
+	svc := NewScheduledRideService(repository.NewScheduledRideRepository(db))
+
+	me, err := customers.FindOrCreateByLineUserID("U_sched_limit", "上限乘客")
+	if err != nil {
+		t.Fatalf("建立乘客失敗：%v", err)
+	}
+
+	now := time.Now()
+	mk := func() error {
+		_, err := svc.createAt(me.ID, ScheduleRideInput{
+			ScheduledAt: now.Add(3 * time.Hour),
+			PickupLat:   25.0330, PickupLng: 121.5654, PickupAddress: "台北101",
+		}, now)
+		return err
+	}
+
+	for i := 0; i < maxPendingSchedules; i++ {
+		if err := mk(); err != nil {
+			t.Fatalf("第 %d 筆就失敗了：%v", i+1, err)
+		}
+	}
+	if err := mk(); !errors.Is(err, ErrTooManySchedules) {
+		t.Fatalf("超過上限應回 ErrTooManySchedules，得到 %v", err)
+	}
+
+	// **取消一筆就該讓出一個名額**——上限算的是「還沒轉單的」，不是「這輩子建過的」。
+	rows, err := svc.List(me.ID, true)
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("讀清單失敗：len=%d err=%v", len(rows), err)
+	}
+	if _, err := svc.Cancel(me.ID, rows[0].ID); err != nil {
+		t.Fatalf("取消失敗：%v", err)
+	}
+	if err := mk(); err != nil {
+		t.Fatalf("取消一筆後應該又能建，得到 %v", err)
+	}
+}
