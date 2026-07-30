@@ -266,6 +266,10 @@ type RideMessage struct {
 	SenderID   int64     `gorm:"column:sender_id;not null" json:"sender_id"`
 	Body       string    `gorm:"not null" json:"body"`
 	CreatedAt  time.Time `gorm:"not null" json:"created_at"`
+	// ClientMsgID 客戶端產生的冪等鍵；nil ＝ 沒帶（既有訊息、LINE webhook 等非 App 來源）。
+	// 送出逾時後 App 用同一個鍵重送，後端據此回既有那筆而不新增——
+	// 訊息在後端沒有唯一狀態，這是唯一能分辨「其實送出了」與「想再說一次」的辦法。
+	ClientMsgID *string `gorm:"column:client_msg_id" json:"client_msg_id,omitempty"`
 }
 
 func (RideMessage) TableName() string {

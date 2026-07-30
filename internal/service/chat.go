@@ -15,12 +15,17 @@ import (
 )
 
 var (
-	ErrEmptyMessage   = errors.New("訊息內容不可為空")
-	ErrMessageTooLong = errors.New("訊息長度超過上限")
+	ErrEmptyMessage       = errors.New("訊息內容不可為空")
+	ErrMessageTooLong     = errors.New("訊息長度超過上限")
+	ErrClientMsgIDTooLong = errors.New("訊息識別碼過長")
 )
 
 // chatMaxRunes 單則訊息長度上限（rune 數；DB 另有 char_length ≤ 1000 的最後防線）。
 const chatMaxRunes = 500
+
+// chatMaxClientMsgIDLen 冪等鍵長度上限，對齊 DB 的 VARCHAR(64)。
+// 客戶端只需要一個「這一次送出」的識別碼，UUID／時間戳＋隨機數都遠短於這個數。
+const chatMaxClientMsgIDLen = 64
 
 // ChatService 乘客↔司機行程內對話：訊息持久化 + WebSocket 即時遞送（chat.message）
 // + App 推播給**收訊那一方**（對方 App 不在前景時 WS 早就斷了）。
@@ -43,13 +48,32 @@ func (s *ChatService) SetAppNotifier(d *notify.Dispatcher) {
 
 // Send 驗證發話者是該趟行程的乘客／被指派司機後寫入訊息，並即時推播給行程雙方。
 // 行程任何狀態皆可傳訊（完成後的遺失物協尋也走同一條對話）。
+//
+// 不帶冪等鍵的舊行為：每次呼叫都是一則新訊息。App 端請改用 [SendWithClientID]。
 func (s *ChatService) Send(role string, senderID, rideID int64, body string) (*model.RideMessage, error) {
+	return s.SendWithClientID(role, senderID, rideID, body, "")
+}
+
+// SendWithClientID 同 [Send]，但帶客戶端產生的冪等鍵。
+//
+// **同一趟行程、同一位發話者、同一個鍵再送一次 → 回既有那筆，不新增、也不重播**
+// （WS 與 App 推播都不再發第二次——對方已經收到過了，重播只會讓他看到同一句話兩次）。
+//
+// 這支存在的理由：訊息送出逾時後，「後端其實收到了、只是回應遺失」與「後端沒收到」
+// 在客戶端看起來一樣，而訊息在後端**沒有唯一狀態**可查（「同內容再送一次」本來合法），
+// 所以無法像接單／取消／協尋／評分那樣靠查詢對帳。鍵由客戶端給、後端據此去重，
+// 是唯一能同時支援「安全重試」與「使用者真的想再說一次」的做法。
+func (s *ChatService) SendWithClientID(role string, senderID, rideID int64, body, clientMsgID string) (*model.RideMessage, error) {
 	body = strings.TrimSpace(body)
 	if body == "" {
 		return nil, ErrEmptyMessage
 	}
 	if utf8.RuneCountInString(body) > chatMaxRunes {
 		return nil, ErrMessageTooLong
+	}
+	clientMsgID = strings.TrimSpace(clientMsgID)
+	if len(clientMsgID) > chatMaxClientMsgIDLen {
+		return nil, ErrClientMsgIDTooLong
 	}
 	ride, err := s.rides.GetByID(rideID)
 	if err != nil {
@@ -58,6 +82,12 @@ func (s *ChatService) Send(role string, senderID, rideID int64, body string) (*m
 	if err := authorizeRideParticipant(ride, role, senderID); err != nil {
 		return nil, err
 	}
+	// 授權通過後才查鍵：不能讓外人拿鍵去試探別人那趟有沒有這則訊息。
+	if existing, err := s.messages.FindByClientMsgID(rideID, role, senderID, clientMsgID); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
 	msg := &model.RideMessage{
 		RideID:     rideID,
 		SenderRole: role,
@@ -65,7 +95,16 @@ func (s *ChatService) Send(role string, senderID, rideID int64, body string) (*m
 		Body:       body,
 		CreatedAt:  time.Now(),
 	}
+	if clientMsgID != "" {
+		msg.ClientMsgID = &clientMsgID
+	}
 	if err := s.messages.Create(msg); err != nil {
+		// 併發重送（兩次請求幾乎同時到）時唯一索引會擋下後到的那筆——
+		// 這時要回先寫進去的那一則，不是把 DB 錯誤丟回 App
+		// （它會顯示成「送出失敗」，而訊息其實已經在了）。
+		if existing, ferr := s.messages.FindByClientMsgID(rideID, role, senderID, clientMsgID); ferr == nil && existing != nil {
+			return existing, nil
+		}
 		return nil, err
 	}
 	s.publishToRideParties(ride, events.Event{
@@ -156,7 +195,7 @@ func (s *ChatService) publishToRideParties(ride *model.Ride, ev events.Event) {
 
 // rideMessagePayload 序列化訊息為 WS 事件 payload（與 REST 回應同欄位）。
 func rideMessagePayload(m *model.RideMessage) map[string]any {
-	return map[string]any{
+	payload := map[string]any{
 		"id":          m.ID,
 		"ride_id":     m.RideID,
 		"sender_role": m.SenderRole,
@@ -164,4 +203,10 @@ func rideMessagePayload(m *model.RideMessage) map[string]any {
 		"body":        m.Body,
 		"created_at":  m.CreatedAt.Format(time.RFC3339),
 	}
+	// 帶上冪等鍵，發話者自己其他裝置的 WS 回聲才認得出「這是我剛送的那則」
+	// （沒帶鍵的訊息就不放這個欄位，維持既有形狀）。
+	if m.ClientMsgID != nil {
+		payload["client_msg_id"] = *m.ClientMsgID
+	}
+	return payload
 }
