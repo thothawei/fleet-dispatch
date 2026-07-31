@@ -40,7 +40,11 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      # 6380 避免與本機 Redis 的 6379 衝突（與上面 postgis 讓開 5432 同一個理由）。
+      # **這個衝突不會報錯，只會靜默連錯台**：本機 redis-server 綁 127.0.0.1、
+      # docker 綁 *，localhost 一律由前者接手——服務跑在主機時吃的是本機那台，
+      # 而你在容器裡 `redis-cli KEYS` 什麼都查不到，很容易誤判成「鍵根本沒寫進去」。
+      - "${REDIS_HOST_PORT:-6380}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

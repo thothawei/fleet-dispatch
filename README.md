@@ -63,6 +63,22 @@ docker compose --profile simulator up -d simulator
 
 > 重跑 `smoke_test.sh` 前建議先 `docker compose down -v` 清掉舊資料，避免殘留訂單干擾。
 
+### 只起相依服務、server 跑在主機（debug 常用）
+
+```bash
+docker compose up -d postgis redis
+DB_HOST=127.0.0.1 DB_PORT=5433 REDIS_ADDR=127.0.0.1:6380 go run ./cmd/server
+```
+
+> **三個變數都要覆寫**：`.env` 裡的 `postgis`／`redis` 是 compose 網路內的主機名，
+> 在主機上解析不到。
+>
+> **Redis 一定要用 6380，不要用 6379**：Mac 上常駐的 `redis-server` 綁 `127.0.0.1:6379`，
+> Docker 綁 `*:6379`，**localhost 一律由本機那台接手**——連錯不會報錯，服務照跑，
+> 但你在容器裡 `redis-cli KEYS` 什麼都查不到（狀態其實寫在本機那台）。
+> 這也是 postgis 讓開 5432 的同一個理由。用
+> `lsof -nP -iTCP:6379 -sTCP:LISTEN` 可以看誰在聽。
+
 ---
 
 ## API 端點
