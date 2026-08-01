@@ -58,19 +58,26 @@ type Config struct {
 	FCMCredentialsFile string
 }
 
-// Load 讀取環境變數，缺省值對應本地 docker-compose
+// Load 讀取環境變數。
+//
+// 缺省值對應的是「**服務跑在主機、相依服務跑在 docker**」這個本地開發跑法，
+// 不是 compose 內部（compose 會把 DB_HOST、REDIS_ADDR 等明設成服務名）。
+// 所以 Redis 缺省是 docker 對外發布的 6380，不是 redis 的標準埠 6379——理由見該行。
 func Load() (*Config, error) {
 	cfg := &Config{
-		AppPort:                 getEnvInt("APP_PORT", 8080),
-		AppEnv:                  getEnv("APP_ENV", "local"),
-		LogLevel:                getEnv("LOG_LEVEL", "info"),
-		DBHost:                  getEnv("DB_HOST", "localhost"),
-		DBPort:                  getEnvInt("DB_PORT", 5432),
-		DBName:                  getEnv("DB_NAME", "fleet"),
-		DBUser:                  getEnv("DB_USER", "fleet"),
-		DBPassword:              getEnv("DB_PASSWORD", "change_me"),
-		DBStatementTimeoutMs:    getEnvInt("DB_STATEMENT_TIMEOUT_MS", 10000),
-		RedisAddr:               getEnv("REDIS_ADDR", "localhost:6379"),
+		AppPort:              getEnvInt("APP_PORT", 8080),
+		AppEnv:               getEnv("APP_ENV", "local"),
+		LogLevel:             getEnv("LOG_LEVEL", "info"),
+		DBHost:               getEnv("DB_HOST", "localhost"),
+		DBPort:               getEnvInt("DB_PORT", 5432),
+		DBName:               getEnv("DB_NAME", "fleet"),
+		DBUser:               getEnv("DB_USER", "fleet"),
+		DBPassword:           getEnv("DB_PASSWORD", "change_me"),
+		DBStatementTimeoutMs: getEnvInt("DB_STATEMENT_TIMEOUT_MS", 10000),
+		// 預設 6380 而不是 6379：這個缺省值只有「服務跑在主機、又沒設 REDIS_ADDR」時才會用到，
+		// 而那正是會靜默連到開發者自己那台 redis-server 的情境（見 docker-compose 的說明）。
+		// docker compose 內一律明設 REDIS_ADDR=redis:6379，不受這行影響。
+		RedisAddr:               getEnv("REDIS_ADDR", "localhost:6380"),
 		LineChannelSecret:       getEnv("LINE_CHANNEL_SECRET", ""),
 		LineChannelAccessToken:  getEnv("LINE_CHANNEL_ACCESS_TOKEN", ""),
 		LiffID:                  getEnv("LIFF_ID", ""),

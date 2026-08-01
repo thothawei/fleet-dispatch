@@ -62,6 +62,12 @@ func main() {
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		log.Fatal().Err(err).Msg("連線 Redis 失敗")
 	}
+	// **連錯台不會失敗**：開發機上常有第二個 redis 在聽（Mac 的 redis-server 綁
+	// 127.0.0.1:6379，比 docker 的 *:6379 精確而優先接手），兩台都 ping 得通，
+	// 於是限流／派單狀態寫進了另一台，而你在容器裡怎麼查都查不到。
+	// ping 成功時把位址印出來，讓「連到哪一台」是一行 log 而不是一小時的猜測
+	// （比照上面 DB 印 statement_timeout 的理由：ops 可見）。
+	log.Info().Str("redis_addr", cfg.RedisAddr).Msg("已連線 Redis")
 
 	// Repositories
 	customerRepo := repository.NewCustomerRepository(db)
