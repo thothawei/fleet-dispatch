@@ -8,8 +8,11 @@
 # load metadata for golang:1.25-alpine，改用這條）：
 #   docker compose up -d postgis redis
 #   DB_HOST=localhost DB_PORT=5433 DB_NAME=fleet DB_USER=fleet DB_PASSWORD=change_me \
-#     REDIS_ADDR=localhost:6379 ADMIN_SEED_USERNAME=admin ADMIN_SEED_PASSWORD=admin \
+#     REDIS_ADDR=127.0.0.1:6380 ADMIN_SEED_USERNAME=admin ADMIN_SEED_PASSWORD=admin \
 #     go run ./cmd/server > /tmp/push_server.log 2>&1 &
+# **Redis 要 6380 不要 6379**：Mac 上常駐的 redis-server 綁 127.0.0.1:6379，比 docker 的
+# *:6379 精確，localhost 一律由它接手——連錯不會報錯（兩台都 ping 得通），只會讓你在容器裡
+# 查不到任何鍵，誤判成「限流／狀態根本沒寫進去」。啟動 log 的 redis_addr 會說這次連了哪台。
 # 跑完看證據：
 #   grep 'App 推播（stub）' /tmp/push_server.log
 set -e
